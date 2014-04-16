@@ -442,7 +442,6 @@ class RawInventor(GrantBase):
     rawlocation_id = Column(Unicode(256), ForeignKey("rawlocation.id"))
     name_first = Column(Unicode(64))
     name_last = Column(Unicode(64))
-    nationality = Column(Unicode(10))
     sequence = Column(Integer, index=True)
 
     # -- Functions for Disambiguation --
@@ -451,8 +450,7 @@ class RawInventor(GrantBase):
     def summarize(self):
         return {
             "name_first": self.name_first,
-            "name_last": self.name_last,
-            "nationality": self.nationality}
+            "name_last": self.name_last}
 
     @hybrid_property
     def __clean__(self):
@@ -659,7 +657,6 @@ class Inventor(GrantBase):
     id = Column(Unicode(36), primary_key=True)
     name_first = Column(Unicode(64))
     name_last = Column(Unicode(64))
-    nationality = Column(Unicode(10))
     rawinventors = relationship("RawInventor", backref="inventor")
 
     @hybrid_property
@@ -675,8 +672,7 @@ class Inventor(GrantBase):
         return {
             "id": self.id,
             "name_first": self.name_first,
-            "name_last": self.name_last,
-            "nationality": self.nationality}
+            "name_last": self.name_last}
 
     @hybrid_property
     def __raw__(self):
@@ -932,7 +928,6 @@ class ForeignCitation(GrantBase):
     uuid = Column(Unicode(36), primary_key=True)
     patent_id = Column(Unicode(20), ForeignKey("patent.id"))
     date = Column(Date)
-    name = Column(Unicode(64))
     kind = Column(Unicode(10))
     number = Column(Unicode(64))
     country = Column(Unicode(10))
@@ -1025,20 +1020,10 @@ class App_Application(ApplicationBase):
     )
 
     classes = relationship("App_USPC", backref="application", cascade=cascade)
-    ipcrs = relationship("App_IPCR", backref="application", cascade=cascade)
 
     rawassignees = relationship("App_RawAssignee", backref="application", cascade=cascade)
     rawinventors = relationship("App_RawInventor", backref="application", cascade=cascade)
     claims = relationship("App_Claim", backref="application", cascade=cascade)
-    usreldocs = relationship(
-        "App_USRelDoc",
-        primaryjoin="App_Application.id == App_USRelDoc.application_id",
-        backref="application", cascade=cascade)
-    relpatents = relationship(
-        "App_USRelDoc",
-        primaryjoin="App_Application.id == App_USRelDoc.rel_id",
-        foreign_keys="App_USRelDoc.rel_id",
-        backref="relpatent", cascade=cascade)
     assignees = relationship("App_Assignee", secondary=applicationassignee, backref="applications")
     inventors = relationship("App_Inventor", secondary=applicationinventor, backref="applications")
 
@@ -1595,23 +1580,6 @@ class App_SubClass(ApplicationBase):
 
 
 # REFERENCES -----------------------
-
-class App_USRelDoc(ApplicationBase):
-    __tablename__ = "usreldoc"
-    uuid = Column(Unicode(36), primary_key=True)
-    application_id = Column(Unicode(20), ForeignKey("application.id"))
-    rel_id = Column(Unicode(20), index=True)
-    doctype = Column(Unicode(64), index=True)
-    status = Column(Unicode(20))
-    date = Column(Date, index=True)
-    number = Column(Unicode(64), index=True)
-    kind = Column(Unicode(10))
-    country = Column(Unicode(20), index=True)
-    relationship = Column(Unicode(64))
-    sequence = Column(Integer, index=True)
-
-    def __repr__(self):
-        return "<USRelDoc('{0}, {1}')>".format(self.number, self.date)
 
 class App_Claim(ApplicationBase):
     __tablename__ = "claim"
