@@ -223,7 +223,7 @@ class Patent(PatentHandler):
                     other_cits.append(data)
                     ocnt += 1
             else:
-                for tag in ['name', 'kind', 'category']:
+                for tag in ['kind', 'category']:
                     data[tag] = citation.contents_of(tag, as_string=True, upper=False)
                 data['date'] = self._fix_date(citation.contents_of('date', as_string=True))
                 data['country'] = citation.contents_of('country', default=[''])[0]
@@ -243,7 +243,6 @@ class Patent(PatentHandler):
         inventor:
           name_last
           name_first
-          nationality
           sequence
         location:
           id
@@ -259,7 +258,6 @@ class Patent(PatentHandler):
             # add inventor data
             inv = {}
             inv.update(self._name_helper_dict(inventor.addressbook))
-            inv['nationality'] = inventor.nationality.contents_of('country', as_string=True)
             # add location data for inventor
             loc = {}
             for tag in ['city', 'state', 'country']:

@@ -62,7 +62,7 @@ class Patent(PatentHandler):
             parser.parse(xml_string)
 
         self.attributes = ['app','application','assignee_list','inventor_list',
-                          'us_relation_list','us_classifications','ipcr_classifications',
+                            'us_classifications',
                           'claims']
 
         self.xml = xh.root.us_patent_application
@@ -184,7 +184,6 @@ class Patent(PatentHandler):
         inventor:
           name_last
           name_first
-          nationality
           sequence
         location:
           id
@@ -207,6 +206,7 @@ class Patent(PatentHandler):
                 loc[tag] = inventor.contents_of(tag, as_string=True, upper=False)
             #this is created because of MySQL foreign key case sensitivities
             loc['id'] = unidecode("|".join([loc['city'], loc['state'], loc['country']]).lower())
+            del inv['nationality']
             if any(inv.values()) or any(loc.values()):
                 inv['sequence'] = i
                 inv['uuid'] = str(uuid.uuid1())
@@ -224,55 +224,6 @@ class Patent(PatentHandler):
             res[tag] = data[0] if data else ''
         res['number'] = xml_util.normalize_document_identifier(
             root.contents_of('doc_number')[0])
-        return res
-
-    @property
-    def us_relation_list(self):
-        """
-        returns list of dictionaries for us reldoc:
-        usreldoc:
-          doctype
-          status (parent status)
-          date
-          number
-          kind
-          country
-          relationship
-          sequence
-        """
-        root = self.xml.us_related_documents
-        if not root:
-            return []
-        root = root[0]
-        res = []
-        i = 0
-        for reldoc in root.children:
-            if reldoc._name == 'related_publication' or \
-               reldoc._name == 'us_provisional_application':
-                data = {'doctype': reldoc._name}
-                data.update(self._get_doc_info(reldoc))
-                data['date'] = self._fix_date(data['date'])
-                if any(data.values()):
-                    data['sequence'] = i
-                    data['uuid'] = str(uuid.uuid1())
-                    i = i + 1
-                    res.append(data)
-            for relation in reldoc.relation:
-                for relationship in ['parent_doc', 'parent_grant_document',
-                                     'parent_pct_document', 'child_doc']:
-                    data = {'doctype': reldoc._name}
-                    doc = getattr(relation, relationship)
-                    if not doc:
-                        continue
-                    data.update(self._get_doc_info(doc[0]))
-                    data['date'] = self._fix_date(data['date'])
-                    data['status'] = doc[0].contents_of('parent_status', as_string=True)
-                    data['relationship'] = relationship  # parent/child
-                    if any(data.values()):
-                        data['sequence'] = i
-                        data['uuid'] = str(uuid.uuid1())
-                        i = i + 1
-                        res.append(data)
         return res
 
     @property
@@ -306,45 +257,6 @@ class Patent(PatentHandler):
                         {'id': "{class}/{subclass}".format(**data).upper()}])
                     i = i + 1
         return classes
-
-    @property
-    def ipcr_classifications(self):
-        """
-        Returns list of dictionaries representing ipcr classifications
-        ipcr:
-          ipc_version_indicator
-          classification_level
-          section
-          class
-          subclass
-          main_group
-          subgroup
-          symbol_position
-          classification_value
-          action_date
-          classification_status
-          classification_data_source
-          sequence
-        """
-        ipcr_classifications = self.xml.classifications_ipcr
-        if not ipcr_classifications:
-            return []
-        res = []
-        # we can safely use [0] because there is only one ipcr_classifications tag
-        for i, ipcr in enumerate(ipcr_classifications.classification_ipcr):
-            data = {}
-            for tag in ['classification_level', 'section',
-                        'class', 'subclass', 'main_group', 'subgroup', 'symbol_position',
-                        'classification_value', 'classification_status',
-                        'classification_data_source']:
-                data[tag] = ipcr.contents_of(tag, as_string=True)
-            data['ipc_version_indicator'] = self._fix_date(ipcr.ipc_version_indicator.contents_of('date', as_string=True))
-            data['action_date'] = self._fix_date(ipcr.action_date.contents_of('date', as_string=True))
-            if any(data.values()):
-                data['sequence'] = i
-                data['uuid'] = str(uuid.uuid1())
-                res.append(data)
-        return res
 
     @property
     def claims(self):

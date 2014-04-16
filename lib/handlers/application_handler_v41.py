@@ -62,7 +62,7 @@ class Patent(PatentHandler):
             parser.parse(xml_string)
 
         self.attributes = ['app','application','assignee_list','inventor_list',
-                          'us_relation_list','us_classifications','ipcr_classifications',
+                          'us_classifications',
                           'claims']
 
         self.xml = xh.root.patent_application_publication
@@ -193,7 +193,6 @@ class Patent(PatentHandler):
         applicant:
           name_last
           name_first
-          nationality
           sequence
         location:
           id
@@ -217,6 +216,7 @@ class Patent(PatentHandler):
             loc['country'] = app['nationality']
             #this is created because of MySQL foreign key case sensitivities
             loc['id'] = unidecode("|".join([loc['city'], loc['state'], loc['country']]).lower())
+            del app['nationality']
             if any(app.values()) or any(loc.values()):
                 app['sequence'] = i
                 app['uuid'] = str(uuid.uuid1())
@@ -237,53 +237,6 @@ class Patent(PatentHandler):
         res['date'] = date if date else ''
         res['number'] = xml_util.normalize_document_identifier(
             root.contents_of('doc_number')[0])
-        return res
-
-    @property
-    def us_relation_list(self):
-        """
-        returns list of dictionaries for us reldoc:
-        usreldoc:
-          doctype
-          status (parent status)
-          date
-          number
-          kind
-          country
-          relationship
-          sequence
-        """
-        root = self.xml.continuations
-        if not root:
-            return []
-        root = root[0]
-        res = []
-        i = 0
-        for reldoc in root.children:
-            if reldoc._name == 'non_provisional_of_provisional':
-                data = {'doctype': 'us_provisional_application'}
-                data.update(self._get_doc_info(reldoc))
-                data['date'] = self._fix_date(data['date'])
-                if any(data.values()):
-                    data['sequence'] = i
-                    data['uuid'] = str(uuid.uuid1())
-                    i = i + 1
-                    res.append(data)
-            for relation in reldoc.parent_child:
-                for relationship in ['parent', 'child']:
-                    data = {'doctype': u'relation'}
-                    doc = getattr(relation, relationship)
-                    if not doc:
-                        continue
-                    data.update(self._get_doc_info(doc[0]))
-                    data['date'] = self._fix_date(data['date'])
-                    data['status'] = relation.contents_of('parent_status', as_string=True)
-                    data['relationship'] = relationship  # parent/child
-                    if any(data.values()):
-                        data['sequence'] = i
-                        data['uuid'] = str(uuid.uuid1())
-                        i = i + 1
-                        res.append(data)
         return res
 
     @property
@@ -317,44 +270,6 @@ class Patent(PatentHandler):
                         {'id': "{class}/{subclass}".format(**data).upper()}])
                     i = i + 1
         return classes
-
-    @property
-    def ipcr_classifications(self):
-        """
-        Returns list of dictionaries representing ipcr classifications
-        ipcr:
-          ipc_version_indicator
-          classification_level
-          section
-          class
-          subclass
-          main_group
-          subgroup
-          symbol_position
-          classification_value
-          action_date
-          classification_status
-          classification_data_source
-          sequence
-        """
-        ipcr_classifications = self.xml.classification_ipc
-        if not ipcr_classifications:
-            return []
-        res = []
-        # we can safely use [0] because there is only one ipcr_classifications tag
-        for i, ipcr in enumerate(ipcr_classifications.classification_ipc_primary + 
-                                 ipcr_classifications.classification_ipc_secondary):
-            data = {}
-            data['classification_level'] = ipcr.contents_of('ipc', as_string=True)[0]
-            data['class'] = ipcr.contents_of('ipc', as_string=True)[1:3]
-            data['subclass'] = ipcr.contents_of('ipc', as_string=True)[3]
-            data['main_group'] = ipcr.contents_of('ipc', as_string=True)[4:7]
-            data['subgroup'] = ipcr.contents_of('ipc', as_string=True).split('/')[1]
-            if any(data.values()):
-                data['sequence'] = i
-                data['uuid'] = str(uuid.uuid1())
-                res.append(data)
-        return res
 
     @property
     def claims(self):
