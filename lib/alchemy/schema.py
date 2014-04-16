@@ -982,43 +982,6 @@ class Claim(GrantBase):
     def __repr__(self):
         return "<Claim('{0}')>".format(self.text)
 
-class FutureCitationRank(GrantBase):
-    """
-    This table contains the rank of each patent by number of future citations
-    in each year.  A row in this table will read something like "Patent Number
-    X got Y future citations in year Z. It was the Nth most cited patent that
-    year"
-    """
-    __tablename__ = "futurecitationrank"
-    uuid = Column(Unicode(36), primary_key=True)
-    patent_id = Column(Unicode(20), ForeignKey('patent.id'))
-    num_citations = Column(Integer)
-    year = Column(Integer)
-    rank = Column(Integer)
-
-class InventorRank(GrantBase):
-    """
-    This table contains the rank of each inventor by how many patents they
-    have been granted in a given year.
-    """
-    __tablename__ = "inventorrank"
-    uuid = Column(Unicode(36), primary_key=True)
-    inventor_id = Column(Unicode(36), ForeignKey('inventor.id'))
-    num_patents = Column(Integer)
-    year = Column(Integer)
-    rank = Column(Integer)
-
-class CitedBy(GrantBase):
-    """
-    Table contains direct mapping of patent_id to all citation_ids that cite that patent.
-    Takes place of the much slower foreign key relation in the Patent table
-    """
-    __tablename__ = "citedby"
-    uuid = Column(Unicode(36), primary_key=True)
-    patent_id = Column(Unicode(20))
-    citation_id = Column(Unicode(36))
-    year = Column(Integer)
-
 ## Application Tables
 
 # ASSOCIATION ----------------------
@@ -1609,24 +1572,6 @@ class App_USPC(ApplicationBase):
         return "<USPC('{1}')>".format(self.subclass_id)
 
 
-class App_IPCR(ApplicationBase):
-    __tablename__ = "ipcr"
-    uuid = Column(Unicode(36), primary_key=True)
-    application_id = Column(Unicode(20), ForeignKey("application.id"))
-    classification_level = Column(Unicode(20))
-    section = Column(Unicode(20))
-    subclass = Column(Unicode(20))
-    main_group = Column(Unicode(20))
-    subgroup = Column(Unicode(20))
-    symbol_position = Column(Unicode(20))
-    classification_value = Column(Unicode(20))
-    classification_status = Column(Unicode(20))
-    classification_data_source = Column(Unicode(20))
-    action_date = Column(Date, index=True)
-    ipc_version_indicator = Column(Date, index=True)
-    sequence = Column(Integer, index=True)
-
-
 class App_MainClass(ApplicationBase):
     __tablename__ = "mainclass"
     id = Column(Unicode(20), primary_key=True)
@@ -1678,29 +1623,3 @@ class App_Claim(ApplicationBase):
 
     def __repr__(self):
         return "<Claim('{0}')>".format(self.text)
-
-class App_FutureCitationRank(ApplicationBase):
-    """
-    This table contains the rank of each patent by number of future citations
-    in each year.  A row in this table will read something like "Patent Number
-    X got Y future citations in year Z. It was the Nth most cited application that
-    year"
-    """
-    __tablename__ = "futurecitationrank"
-    uuid = Column(Unicode(36), primary_key=True)
-    application_id = Column(Unicode(20), ForeignKey('application.id'))
-    num_citations = Column(Integer)
-    year = Column(Integer)
-    rank = Column(Integer)
-
-class App_InventorRank(ApplicationBase):
-    """
-    This table contains the rank of each inventor by how many applications they
-    have been granted in a given year.
-    """
-    __tablename__ = "inventorrank"
-    uuid = Column(Unicode(36), primary_key=True)
-    inventor_id = Column(Unicode(36), ForeignKey('inventor.id'))
-    num_applications = Column(Integer)
-    year = Column(Integer)
-    rank = Column(Integer)
