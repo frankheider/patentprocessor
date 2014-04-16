@@ -440,10 +440,8 @@ def find_difficult_locations_from_file(inputfilename, outputfilename):
     print datetime.datetime.now()-t
 
 if __name__=='__main__':
-    doctype = 'grant'
-    schema = alchemy.schema.RawLocation
-    if len(sys.argv) > 1:
-        doctype = sys.argv[1]
-        schema = schema if doctype == 'grant' else alchemy.schema.App_RawLocation
-    numlocs = alchemy.fetch_session(dbtype=doctype).query(schema).count()
-    main(doctype=doctype)
+    global doctype
+    doctype='grant'
+    main(doctype='grant')
+    doctype = 'application'
+    main(doctype='application')
