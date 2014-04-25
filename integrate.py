@@ -38,7 +38,7 @@ import sys
 import lib.alchemy as alchemy
 from lib.util.csv_reader import read_file
 from lib.alchemy import is_mysql
-from lib.alchemy.schema import Inventor, RawInventor, patentinventor
+from lib.alchemy.schema import Inventor, RawInventor, patentinventor, App_Inventor, App_RawInventor, applicationinventor
 from lib.handlers.xml_util import normalize_document_identifier
 from collections import defaultdict
 import cPickle as pickle
@@ -66,32 +66,44 @@ def integrate(disambig_input_file, disambig_output_file):
     just have to populate the fields of the disambiguated inventor object:
         inventor id, first name, last name, nationality (?)
     """
-    #disambig_input = pd.read_csv(disambig_input_file,header=None,delimiter='\t',encoding='utf-8',skiprows=[1991872])
-    #disambig_output = pd.read_csv(disambig_output_file,header=None,delimiter='\t',encoding='utf-8',skiprows=[1991872])
-    disambig_input = pd.read_csv(disambig_input_file,header=None,delimiter='\t',encoding='utf-8',skiprows=[1991872])
-    disambig_output = pd.read_csv(disambig_output_file,header=None,delimiter='\t',encoding='utf-8',skiprows=[1991872])
-    #disambig_input[0] = disambig_input[0].apply(str)
-    #disambig_output[0] = disambig_output[0].apply(str)
+    disambig_input = pd.read_csv(disambig_input_file,header=None,delimiter='\t',encoding='utf-8')
+    disambig_output = pd.read_csv(disambig_output_file,header=None,delimiter='\t',encoding='utf-8')
+    disambig_input[0] = disambig_input[0].apply(str)
+    disambig_output[0] = disambig_output[0].apply(str)
     print 'finished loading csvs'
     merged = pd.merge(disambig_input, disambig_output, on=0)
-    import IPython
-    d = locals()
-    d.update(globals())
-    IPython.embed(user_ns=d)
+#    import IPython
+#    d = locals()
+#    d.update(globals())
+#    IPython.embed(user_ns=d)
+#    sys.exit(0)
+    merged.columns = ['rawinventor_uuid','isgrant','granted','name_first','name_middle','name_last','patent_id','mainclass','subclass','city','state','country','assignee','rawassignee','prev_inventorid','current_inventorid']
     print 'finished merging'
+    apps = merged[merged['isgrant'] == 0]
+
+
+    #TODO: use the isgrant column to separate app,grant records
+    inventor_attributes = merged[['isgrant','rawinventor_uuid','current_inventorid','name_first','name_middle','name_last','patent_id']] # rawinventor uuid, inventor id, first name, middle name, last name, patent_id
     #inventor_attributes = merged[[0,'1_y','1_x',2,3,4]] # rawinventor uuid, inventor id, first name, middle name, last name, patent_id
-    inventor_attributes = inventor_attributes.dropna(subset=[0],how='all')
-    inventor_attributes[2] = inventor_attributes[2].fillna('')
-    inventor_attributes[3] = inventor_attributes[3].fillna('')
-    inventor_attributes['1_x'] = inventor_attributes['1_x'].fillna('')
+    inventor_attributes = inventor_attributes.dropna(subset=['rawinventor_uuid'],how='all')
+    inventor_attributes['name_first'] = inventor_attributes['name_first'].fillna('')
+    inventor_attributes['name_middle'] = inventor_attributes['name_middle'].fillna('')
+    inventor_attributes['name_last'] = inventor_attributes['name_last'].fillna('')
+
+    grants = inventor_attributes[inventor_attributes['isgrant'] == 1]
+    apps = inventor_attributes[inventor_attributes['isgrant'] == 0]
+    del grants['isgrant']
+    del apps['isgrant']
+
+    ####### DO GRANTS #######
     rawinventors = defaultdict(list)
     inventor_inserts = []
     rawinventor_updates = []
     patentinventor_inserts = []
-    for row in inventor_attributes.iterrows():
-        uuid = row[1]['1_y']
+    for row in grants.iterrows():
+        uuid = row[1]['current_inventorid']
         rawinventors[uuid].append(row[1])
-        patentinventor_inserts.append({'inventor_id': uuid, 'patent_id': row[1][4]})
+        patentinventor_inserts.append({'inventor_id': uuid, 'patent_id': row[1]['patent_id']})
     print 'finished associating ids'
     i = 0
     for inventor_id in rawinventors.iterkeys():
@@ -102,7 +114,7 @@ def integrate(disambig_input_file, disambig_output_file):
         names = []
         for raw in rawinventors[inventor_id]:
             rawuuids.append(raw[0])
-            name = ' '.join(x for x in (raw['1_x'], raw[2], raw[3]) if x)
+            name = ' '.join(x for x in (raw['name_first'], raw['name_middle'], raw['name_last']) if x)
             freq['name'][name] += 1
             for k,v in raw.iteritems():
                 freq[k][v] += 1
@@ -120,7 +132,7 @@ def integrate(disambig_input_file, disambig_output_file):
         if i % 100000 == 0:
             print i, datetime.now(), rawuuids[0]
     print 'finished voting'
-    session_generator = alchemy.session_generator()
+    session_generator = alchemy.session_generator(dbtype='grant')
     session = session_generator()
     if alchemy.is_mysql():
         session.execute('truncate inventor; truncate patent_inventor;')
@@ -128,22 +140,74 @@ def integrate(disambig_input_file, disambig_output_file):
         session.execute('delete from inventor; delete from patent_inventor;')
 
     from lib.tasks import bulk_commit_inserts, bulk_commit_updates
-    bulk_commit_inserts(inventor_inserts, Inventor.__table__, is_mysql(), 20000)
-    bulk_commit_inserts(patentinventor_inserts, patentinventor, is_mysql(), 20000)
-    bulk_commit_updates('inventor_id', rawinventor_updates, RawInventor.__table__, is_mysql(), 20000)
+    bulk_commit_inserts(inventor_inserts, Inventor.__table__, is_mysql(), 20000,'grant')
+    bulk_commit_inserts(patentinventor_inserts, patentinventor, is_mysql(), 20000,'grant')
+    bulk_commit_updates('inventor_id', rawinventor_updates, RawInventor.__table__, is_mysql(), 20000,'grant')
 
 
-    doctype = 'grant'
+    ###### DO APPLICATIONS ######
+
+    rawinventors = defaultdict(list)
+    inventor_inserts = []
+    rawinventor_updates = []
+    patentinventor_inserts = []
+    for row in apps.iterrows():
+        uuid = row[1]['current_inventorid']
+        rawinventors[uuid].append(row[1])
+        patentinventor_inserts.append({'inventor_id': uuid, 'patent_id': row[1]['patent_id']})
+    print 'finished associating ids'
+    i = 0
+    for inventor_id in rawinventors.iterkeys():
+        i += 1
+        freq = defaultdict(Counter)
+        param = {}
+        rawuuids = []
+        names = []
+        for raw in rawinventors[inventor_id]:
+            rawuuids.append(raw[0])
+            name = ' '.join(x for x in (raw['name_first'], raw['name_middle'], raw['name_last']) if x)
+            freq['name'][name] += 1
+            for k,v in raw.iteritems():
+                freq[k][v] += 1
+        param['id'] = inventor_id
+        name = freq['name'].most_common(1)[0][0]
+        name_first = unidecode(' '.join(name.split(' ')[:-1]))
+        name_last = unidecode(name.split(' ')[-1])
+        param['name_first'] = name_first
+        param['name_last'] = name_last
+        param['nationality'] = ''
+        assert set(param.keys()) == {'id','name_first','name_last','nationality'}
+        inventor_inserts.append(param)
+        for rawuuid in rawuuids:
+            rawinventor_updates.append({'pk': rawuuid, 'update': param['id']})
+        if i % 100000 == 0:
+            print i, datetime.now(), rawuuids[0]
+    print 'finished voting'
+    session_generator = alchemy.session_generator(dbtype='application')
+    session = session_generator()
+    if alchemy.is_mysql():
+        session.execute('truncate inventor; truncate application_inventor;')
+    else:
+        session.execute('delete from inventor; delete from application_inventor;')
+
+    from lib.tasks import bulk_commit_inserts, bulk_commit_updates
+    bulk_commit_inserts(inventor_inserts, App_Inventor.__table__, is_mysql(), 20000,'application')
+    bulk_commit_inserts(patentinventor_inserts, applicationinventor, is_mysql(), 20000,'application')
+    bulk_commit_updates('inventor_id', rawinventor_updates, App_RawInventor.__table__, is_mysql(), 20000,'application')
+
+
+    doctype = 'application'
+    session.execute('truncate location_assignee;')
     res = session.execute('select location.id, assignee.id from assignee \
                            inner join rawassignee on rawassignee.assignee_id = assignee.id \
                            inner join rawlocation on rawlocation.id = rawassignee.rawlocation_id \
                            inner join location on location.id = rawlocation.location_id;')
     assigneelocation = pd.DataFrame.from_records(res.fetchall())
-    print assigneelocation.info()
     assigneelocation = assigneelocation[assigneelocation[0].notnull()]
     assigneelocation = assigneelocation[assigneelocation[1].notnull()]
     assigneelocation.columns = ['location_id','assignee_id']
     assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
+    print assigneelocation.info()
     locationassignee_inserts = [row[1].to_dict() for row in assigneelocation.iterrows()]
     if doctype == 'grant':
         bulk_commit_inserts(locationassignee_inserts, alchemy.schema.locationassignee, alchemy.is_mysql(), 20000, 'grant')
@@ -156,11 +220,11 @@ def integrate(disambig_input_file, disambig_output_file):
                            right join rawlocation on rawlocation.id = rawinventor.rawlocation_id \
                            right join location on location.id = rawlocation.location_id;')
     inventorlocation = pd.DataFrame.from_records(res.fetchall())
-    print inventorlocation.info()
     inventorlocation = inventorlocation[inventorlocation[0].notnull()]
     inventorlocation = inventorlocation[inventorlocation[1].notnull()]
     inventorlocation.columns = ['location_id','inventor_id']
     inventorlocation = inventorlocation.drop_duplicates(cols='inventor_id',take_last=True)
+    print inventorlocation.info()
     locationinventor_inserts = [row[1].to_dict() for row in inventorlocation.iterrows()]
     if doctype == 'grant':
         bulk_commit_inserts(locationinventor_inserts, alchemy.schema.locationinventor, alchemy.is_mysql(), 20000, 'grant')
