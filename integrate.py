@@ -72,19 +72,12 @@ def integrate(disambig_input_file, disambig_output_file):
     disambig_output[0] = disambig_output[0].apply(str)
     print 'finished loading csvs'
     merged = pd.merge(disambig_input, disambig_output, on=0)
-#    import IPython
-#    d = locals()
-#    d.update(globals())
-#    IPython.embed(user_ns=d)
-#    sys.exit(0)
     merged.columns = ['rawinventor_uuid','isgrant','granted','name_first','name_middle','name_last','patent_id','mainclass','subclass','city','state','country','assignee','rawassignee','prev_inventorid','current_inventorid']
     print 'finished merging'
     apps = merged[merged['isgrant'] == 0]
 
 
-    #TODO: use the isgrant column to separate app,grant records
     inventor_attributes = merged[['isgrant','rawinventor_uuid','current_inventorid','name_first','name_middle','name_last','patent_id']] # rawinventor uuid, inventor id, first name, middle name, last name, patent_id
-    #inventor_attributes = merged[[0,'1_y','1_x',2,3,4]] # rawinventor uuid, inventor id, first name, middle name, last name, patent_id
     inventor_attributes = inventor_attributes.dropna(subset=['rawinventor_uuid'],how='all')
     inventor_attributes['name_first'] = inventor_attributes['name_first'].fillna('')
     inventor_attributes['name_middle'] = inventor_attributes['name_middle'].fillna('')
@@ -132,8 +125,8 @@ def integrate(disambig_input_file, disambig_output_file):
         if i % 100000 == 0:
             print i, datetime.now(), rawuuids[0]
     print 'finished voting'
-    session_generator = alchemy.session_generator(dbtype='grant')
-    session = session_generator()
+    ession_generator = alchemy.session_generator(dbtype='grant')
+    ession = session_generator()
     if alchemy.is_mysql():
         session.execute('truncate inventor; truncate patent_inventor;')
     else:
@@ -196,40 +189,64 @@ def integrate(disambig_input_file, disambig_output_file):
     bulk_commit_updates('inventor_id', rawinventor_updates, App_RawInventor.__table__, is_mysql(), 20000,'application')
 
 
-    doctype = 'application'
+    doctype = 'grant'
     session.execute('truncate location_assignee;')
-    res = session.execute('select location.id, assignee.id from assignee \
-                           inner join rawassignee on rawassignee.assignee_id = assignee.id \
-                           inner join rawlocation on rawlocation.id = rawassignee.rawlocation_id \
-                           inner join location on location.id = rawlocation.location_id;')
+    res = session.execute('select location_id, assignee_id from patent \
+        left join rawassignee on rawassignee.patent_id = patent.id \
+        left join rawlocation on rawlocation.id = rawassignee.rawlocation_id \
+        where assignee_id != "" and location_id != "";')
     assigneelocation = pd.DataFrame.from_records(res.fetchall())
-    assigneelocation = assigneelocation[assigneelocation[0].notnull()]
-    assigneelocation = assigneelocation[assigneelocation[1].notnull()]
     assigneelocation.columns = ['location_id','assignee_id']
+    assigneelocation = assigneelocation.sort('assignee_id')
     assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
     print assigneelocation.info()
     locationassignee_inserts = [row[1].to_dict() for row in assigneelocation.iterrows()]
-    if doctype == 'grant':
-        bulk_commit_inserts(locationassignee_inserts, alchemy.schema.locationassignee, alchemy.is_mysql(), 20000, 'grant')
-    elif doctype == 'application':
-        bulk_commit_inserts(locationassignee_inserts, alchemy.schema.app_locationassignee, alchemy.is_mysql(), 20000, 'application')
+    bulk_commit_inserts(locationassignee_inserts, alchemy.schema.locationassignee, alchemy.is_mysql(), 20000, 'grant')
 
     session.execute('truncate location_inventor;')
-    res = session.execute('select location.id, inventor.id from inventor \
-                           left join rawinventor on rawinventor.inventor_id = inventor.id \
-                           right join rawlocation on rawlocation.id = rawinventor.rawlocation_id \
-                           right join location on location.id = rawlocation.location_id;')
+    res = session.execute('select location_id, inventor_id from patent \
+        left join rawinventor on rawinventor.patent_id = patent.id \
+        left join rawlocation on rawlocation.id = rawinventor.rawlocation_id \
+        where inventor_id != "" and location_id != "";')
     inventorlocation = pd.DataFrame.from_records(res.fetchall())
-    inventorlocation = inventorlocation[inventorlocation[0].notnull()]
-    inventorlocation = inventorlocation[inventorlocation[1].notnull()]
     inventorlocation.columns = ['location_id','inventor_id']
     inventorlocation = inventorlocation.drop_duplicates(cols='inventor_id',take_last=True)
+    assigneelocation = assigneelocation.sort('assignee_id')
+    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
     print inventorlocation.info()
     locationinventor_inserts = [row[1].to_dict() for row in inventorlocation.iterrows()]
-    if doctype == 'grant':
-        bulk_commit_inserts(locationinventor_inserts, alchemy.schema.locationinventor, alchemy.is_mysql(), 20000, 'grant')
-    elif doctype == 'application':
-        bulk_commit_inserts(locationinventor_inserts, alchemy.schema.app_locationinventor, alchemy.is_mysql(), 20000, 'application')
+    bulk_commit_inserts(locationinventor_inserts, alchemy.schema.locationinventor, alchemy.is_mysql(), 20000, 'grant')
+
+    doctype = 'application'
+    session_generator = alchemy.session_generator(dbtype='application')
+    session = session_generator()
+    session.execute('truncate location_assignee;')
+    res = session.execute('select location_id, assignee_id from application \
+        left join rawassignee on rawassignee.application_id = application.id \
+        left join rawlocation on rawlocation.id = rawassignee.rawlocation_id \
+        where assignee_id != "" and location_id != "";')
+    assigneelocation = pd.DataFrame.from_records(res.fetchall())
+    assigneelocation.columns = ['location_id','assignee_id']
+    assigneelocation = assigneelocation.sort('assignee_id')
+    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
+    print assigneelocation.info()
+    locationassignee_inserts = [row[1].to_dict() for row in assigneelocation.iterrows()]
+    bulk_commit_inserts(locationassignee_inserts, alchemy.schema.app_locationassignee, alchemy.is_mysql(), 20000, 'application')
+
+    session.execute('truncate location_inventor;')
+    res = session.execute('select location_id, inventor_id from application \
+        left join rawinventor on rawinventor.application_id = application.id \
+        left join rawlocation on rawlocation.id = rawinventor.rawlocation_id \
+        where inventor_id != "" and location_id != "";')
+    inventorlocation = pd.DataFrame.from_records(res.fetchall())
+    inventorlocation.columns = ['location_id','inventor_id']
+    inventorlocation = inventorlocation.drop_duplicates(cols='inventor_id',take_last=True)
+    assigneelocation = assigneelocation.sort('assignee_id')
+    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
+    print inventorlocation.info()
+    locationinventor_inserts = [row[1].to_dict() for row in inventorlocation.iterrows()]
+    bulk_commit_inserts(locationinventor_inserts, alchemy.schema.app_locationinventor, alchemy.is_mysql(), 20000, 'application')
+
 
 def main():
     if len(sys.argv) <= 2:
