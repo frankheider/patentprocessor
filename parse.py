@@ -46,6 +46,7 @@ import lib.argconfig_parse as argconfig_parse
 import lib.alchemy as alchemy
 import shutil
 from lib.config_parser import get_xml_handlers
+from lib.alchemy.match import commit_inserts, commit_updates
 
 logfile = "./" + 'xml-parsing.log'
 logging.basicConfig(filename=logfile, level=logging.DEBUG)
@@ -178,6 +179,15 @@ def move_tables(output_directory):
     except:
         print 'Database file {0} does not exist'.format(dbfile)
 
+def mark_granted():
+    from lib.tasks import bulk_commit_updates
+    grantsessiongen = alchemy.session_generator(dbtype='grant')
+    appsessiongen = alchemy.session_generator(dbtype='application')
+    grantsession = grantsessiongen()
+    granted_apps = [{'pk': x.id, 'update': 1} for x in list(grantsessiongen.query(alchemy.schema.Application))]
+
+    appsession = appsessiongen()
+    bulk_commit_updates('granted', granted_apps, alchemy.schema.App_Application.__table__, alchemy.is_mysql(), 20000, 'application')
 
 def main(patentroot, xmlregex, verbosity, output_directory='.', doctype='grant'):
     logfile = "./" + 'xml-parsing.log'
@@ -192,6 +202,9 @@ def main(patentroot, xmlregex, verbosity, output_directory='.', doctype='grant')
 
     logging.info("SQL tables moved to {0}".format(output_directory))
     logging.info("Parse completed at {0}".format(str(datetime.datetime.today())))
+
+    logging.info("Marking granted applications")
+    mark_granted()
 
 
 if __name__ == '__main__':
