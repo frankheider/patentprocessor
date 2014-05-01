@@ -125,8 +125,8 @@ def integrate(disambig_input_file, disambig_output_file):
         if i % 100000 == 0:
             print i, datetime.now(), rawuuids[0]
     print 'finished voting'
-    ession_generator = alchemy.session_generator(dbtype='grant')
-    ession = session_generator()
+    session_generator = alchemy.session_generator(dbtype='grant')
+    session = session_generator()
     if alchemy.is_mysql():
         session.execute('truncate inventor; truncate patent_inventor;')
     else:
@@ -189,6 +189,8 @@ def integrate(disambig_input_file, disambig_output_file):
     bulk_commit_updates('inventor_id', rawinventor_updates, App_RawInventor.__table__, is_mysql(), 20000,'application')
 
 
+    session_generator = alchemy.session_generator(dbtype='grant')
+    session = session_generator()
     doctype = 'grant'
     session.execute('truncate location_assignee;')
     res = session.execute('select location_id, assignee_id from patent \
@@ -198,7 +200,6 @@ def integrate(disambig_input_file, disambig_output_file):
     assigneelocation = pd.DataFrame.from_records(res.fetchall())
     assigneelocation.columns = ['location_id','assignee_id']
     assigneelocation = assigneelocation.sort('assignee_id')
-    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
     print assigneelocation.info()
     locationassignee_inserts = [row[1].to_dict() for row in assigneelocation.iterrows()]
     bulk_commit_inserts(locationassignee_inserts, alchemy.schema.locationassignee, alchemy.is_mysql(), 20000, 'grant')
@@ -210,9 +211,7 @@ def integrate(disambig_input_file, disambig_output_file):
         where inventor_id != "" and location_id != "";')
     inventorlocation = pd.DataFrame.from_records(res.fetchall())
     inventorlocation.columns = ['location_id','inventor_id']
-    inventorlocation = inventorlocation.drop_duplicates(cols='inventor_id',take_last=True)
-    assigneelocation = assigneelocation.sort('assignee_id')
-    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
+    inventorlocation = inventorlocation.sort('inventor_id')
     print inventorlocation.info()
     locationinventor_inserts = [row[1].to_dict() for row in inventorlocation.iterrows()]
     bulk_commit_inserts(locationinventor_inserts, alchemy.schema.locationinventor, alchemy.is_mysql(), 20000, 'grant')
@@ -228,7 +227,6 @@ def integrate(disambig_input_file, disambig_output_file):
     assigneelocation = pd.DataFrame.from_records(res.fetchall())
     assigneelocation.columns = ['location_id','assignee_id']
     assigneelocation = assigneelocation.sort('assignee_id')
-    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
     print assigneelocation.info()
     locationassignee_inserts = [row[1].to_dict() for row in assigneelocation.iterrows()]
     bulk_commit_inserts(locationassignee_inserts, alchemy.schema.app_locationassignee, alchemy.is_mysql(), 20000, 'application')
@@ -240,9 +238,7 @@ def integrate(disambig_input_file, disambig_output_file):
         where inventor_id != "" and location_id != "";')
     inventorlocation = pd.DataFrame.from_records(res.fetchall())
     inventorlocation.columns = ['location_id','inventor_id']
-    inventorlocation = inventorlocation.drop_duplicates(cols='inventor_id',take_last=True)
-    assigneelocation = assigneelocation.sort('assignee_id')
-    assigneelocation = assigneelocation.drop_duplicates(cols='assignee_id',take_last=True)
+    inventorlocation = inventorlocation.sort('inventor_id')
     print inventorlocation.info()
     locationinventor_inserts = [row[1].to_dict() for row in inventorlocation.iterrows()]
     bulk_commit_inserts(locationinventor_inserts, alchemy.schema.app_locationinventor, alchemy.is_mysql(), 20000, 'application')
