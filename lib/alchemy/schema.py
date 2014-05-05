@@ -719,8 +719,6 @@ class Inventor(GrantBase):
             self.name_first = kwargs["name_first"]
         if "name_last" in kwargs:
             self.name_last = kwargs["name_last"]
-        if "nationality" in kwargs:
-            self.nationality = kwargs["nationality"]
 
     @classmethod
     def fetch(self, session, default={}):
@@ -1307,7 +1305,6 @@ class App_RawInventor(ApplicationBase):
     rawlocation_id = Column(Unicode(256), ForeignKey("rawlocation.id"))
     name_first = Column(Unicode(64))
     name_last = Column(Unicode(64))
-    nationality = Column(Unicode(10))
     sequence = Column(Integer, index=True)
 
     # -- Functions for Disambiguation --
@@ -1316,8 +1313,7 @@ class App_RawInventor(ApplicationBase):
     def summarize(self):
         return {
             "name_first": self.name_first,
-            "name_last": self.name_last,
-            "nationality": self.nationality}
+            "name_last": self.name_last}
 
     @hybrid_property
     def __clean__(self):
