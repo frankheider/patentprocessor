@@ -381,7 +381,6 @@ def add_application(obj, override=True, temp=False):
 def add_all_app_fields(obj, app):
     add_app_asg(obj, app)
     add_app_inv(obj, app)
-    add_app_usreldoc(obj, app)
     add_app_classes(obj, app)
     add_app_claims(obj, app)
 
@@ -406,14 +405,6 @@ def add_app_inv(obj, app):
         appsession.merge(loc)
         inv.rawlocation = loc
         app.rawinventors.append(inv)
-
-
-def add_app_usreldoc(obj, app):
-    for usr in obj.us_relation_list:
-        usr = fixid(usr)
-        usr["rel_id"] = usr["number"]
-        usr = schema.App_USRelDoc(**usr)
-        app.usreldocs.append(usr)
 
 
 def add_app_classes(obj, app):
