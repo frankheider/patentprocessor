@@ -51,6 +51,7 @@ from tasks import bulk_commit_inserts, bulk_commit_updates
 import multiprocessing
 import itertools
 import sys
+import json
 
 config = get_config()
 
@@ -68,6 +69,7 @@ appsessiongen = alchemy.session_generator(dbtype='application')
 
 nodigits = re.compile(r'[a-z ]')
 stoplist = ['the','of','and','a','an','at']
+substitutions = json.load(open('nber_substitutions.json'))
 
 def isgrant(obj):
     """
@@ -97,6 +99,8 @@ def get_cleanid(obj):
                         x not in stoplist,
                         cleanid.split()))
     cleanid = ''.join(nodigits.findall(cleanid)).strip()
+    for pair in substitutions:
+      cleanid = cleanid.replace(pair[0], pair[1])
     return cleanid
 
 def get_similarity(uuid1, uuid2):
