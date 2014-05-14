@@ -153,7 +153,7 @@ def join(newfile):
     round with inventor_ids they were assigned in the previous round of
     disambiguation. This improves the runtime of the inventor disambiguator
     """
-    new = pd.read_csv(newfile,delimiter='\t',header=None)
+    new = pd.read_csv(newfile,delimiter='\t',header=None, error_bad_lines=False)
     new[0] = new[0].astype(str)
     ses_gen = alchemy.session_generator(dbtype='grant')
     s = ses_gen()
