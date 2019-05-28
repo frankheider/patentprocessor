@@ -33,15 +33,15 @@ Uses the extended ContentHandler from xml_driver to extract the needed fields
 from patent grant documents
 """
 
-from cStringIO import StringIO
+from io import StringIO
 from datetime import datetime
 from unidecode import unidecode
-from handler import Patobj, PatentHandler
-import re
+from lib.handlers.handler import PatentHandler
+import regex as re
 import uuid
 import xml.sax
-import xml_util
-import xml_driver
+from lib.handlers import xml_util
+from lib.handlers import xml_driver
 
 claim_num_regex = re.compile(r'^\d+\. *') # removes claim number from claim text
 
@@ -75,10 +75,12 @@ class Patent(PatentHandler):
             self.pat_type = self.xml.application_reference[0].get_attribute('appl-type', upper=False)
         else:
             self.pat_type = None
+        #print ("Application: ", self.application, self.kind)
+      
         self.clm_num = len(self.xml.claims.claim)
         self.abstract = self.xml.abstract.contents_of('p', '', as_string=True, upper=False)
         self.invention_title = self._invention_title()
-
+        
         self.app = {
             "id": self.application,
             "type": self.pat_type,
@@ -133,7 +135,7 @@ class Patent(PatentHandler):
             datestring = datetime.strptime(datestring, '%Y%m%d')
             return datestring
         except Exception as inst:
-            print inst, datestring
+            print (inst, datestring)
             return None
 
     @property
@@ -162,6 +164,9 @@ class Patent(PatentHandler):
             asg = {}
             asg.update(self._name_helper_dict(assignee))  # add firstname, lastname
             asg['organization'] = assignee.contents_of('orgname', as_string=True, upper=False)
+
+            #print (asg['organization'])
+            
             asg['role'] = assignee.contents_of('role', as_string=True)
             asg['nationality'] = assignee.contents_of('country', as_string=True)
             asg['residence'] = assignee.contents_of('country', as_string=True)
@@ -199,6 +204,8 @@ class Patent(PatentHandler):
             # add inventor data
             inv = {}
             inv.update(self._name_helper_dict(inventor.addressbook))
+            #print (inv['name_first'] + ' ' + inv['name_last'])
+
             inv['nationality'] = inventor.contents_of('country', as_string=True)
             # add location data for inventor
             loc = {}

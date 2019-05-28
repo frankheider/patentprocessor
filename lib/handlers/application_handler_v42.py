@@ -33,15 +33,17 @@ Uses the extended ContentHandler from xml_driver to extract the needed fields
 from patent grant documents
 """
 
-from cStringIO import StringIO
+from io import StringIO
 from datetime import datetime
 from unidecode import unidecode
-from handler import Patobj, PatentHandler
-import re
+
+from lib.handlers.handler import PatentHandler
+
+import regex as re
 import uuid
 import xml.sax
-import xml_util
-import xml_driver
+from lib.handlers import xml_util
+from lib.handlers import xml_driver
 
 claim_num_regex = re.compile(r'^\d+\. *') # removes claim number from claim text
 
@@ -133,7 +135,7 @@ class Patent(PatentHandler):
             datestring = datetime.strptime(datestring, '%Y%m%d')
             return datestring
         except Exception as inst:
-            print inst, datestring
+            print (inst, datestring)
             return None
 
     @property

@@ -37,7 +37,8 @@ provides useful helper methods to handle the parsed data.
 import functools
 from collections import deque
 from xml.sax import make_parser, handler
-import xml_util
+
+from lib.handlers import xml_util
 
 class ChainList(list):
     """
@@ -52,7 +53,15 @@ class ChainList(list):
             res.extend(item.contents_of(tag, upper=upper))
         if as_string:
             res = [r for r in res if type(r).__name__ not in ('tuple', 'list')]
-            return ' '.join(res) if res else ''
+            if not res:
+                return ''
+            # handle corner case of [['content', 'here']]
+            elif isinstance(res, list)\
+                 and len(res) == 1\
+                 and isinstance(res[0], list):
+                res = res[0]
+            return ' '.join(filter(lambda x: x, filter(lambda x: isinstance(x, str), res))) 
+#        ' '.join(res) if res else ''
         return ChainList(res) if res else default
 
     def __getattr__(self, key):
@@ -120,14 +129,18 @@ class XMLElement(object):
                  and len(res) == 1\
                  and isinstance(res[0], list):
                 res = res[0]
-            return ' '.join(filter(lambda x: x, filter(lambda x: not isinstance(x, list), res)))
+            return ' '.join(filter(lambda x: x, filter(lambda x: isinstance(x, str), res)))
         return res
 
     def get_content(self, upper=True):
         if len(self.content) == 1:
             return xml_util.clean(self.content[0], upper=upper)
         else:
-            return map(functools.partial(xml_util.clean, upper=upper), self.content)
+            ml = []
+            for x in self.content:
+                ml.append (x)
+            return ml
+        #map(functools.partial(xml_util.clean, upper=upper), self.content)
 
     def put_content(self, content, lastlinenumber, linenumber):
         if not self.content or lastlinenumber != linenumber:
@@ -175,11 +188,11 @@ class XMLHandler(handler.ContentHandler):
     def characters(self, content):
         currentlinenumber = self._locator.getLineNumber()
         if content.strip():
-          if self.elements[-1]._name in ('b','i'):
-            self.elements[-2].put_content(content, self.lastline, currentlinenumber)
-          elif self.elements[-1]._name == 'sub':
-            newtxt = u"<sub>"+content+u"</sub>"
-            self.elements[-2].put_content(newtxt, self.lastline, currentlinenumber)
-          else:
-            self.elements[-1].put_content(content, self.lastline, currentlinenumber)
+            if self.elements[-1]._name in ('b','i'):
+                self.elements[-2].put_content(content, self.lastline, currentlinenumber)
+            elif self.elements[-1]._name == 'sub':
+                newtxt = u"<sub>"+content+u"</sub>"
+                self.elements[-2].put_content(newtxt, self.lastline, currentlinenumber)
+            else:
+                self.elements[-1].put_content(content, self.lastline, currentlinenumber)
         self.lastline = self._locator.getLineNumber()

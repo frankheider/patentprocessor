@@ -26,15 +26,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 @author Gabe Fierro gt.fierro@berkeley.edu github.com/gtfierro
 """
-from collections import defaultdict
-from collections import Counter
 from sqlalchemy.sql.expression import bindparam
-from sqlalchemy import create_engine, MetaData, Table, inspect, VARCHAR, Column
-from sqlalchemy.orm import sessionmaker
 
 from datetime import datetime
 
-def commit_inserts(session, insert_statements, table, is_mysql, commit_frequency = 1000):
+def commit_inserts(session, insert_statements, table, dbtype = "mysql", commit_frequency = 1000):
     """
     Executes bulk inserts for a given table. This is typically much faster than going through
     the SQLAlchemy ORM. The insert_statement list of dictionaries may fall victim to SQLAlchemy
@@ -45,28 +41,49 @@ def commit_inserts(session, insert_statements, table, is_mysql, commit_frequency
     session -- alchemy session object
     insert_statements -- list of dictionaries where each dictionary contains key-value pairs of the object
     table -- SQLAlchemy table object. If you have a table reference, you can use TableName.__table__
-    is_mysql -- adjusts syntax based on if we are committing to MySQL or SQLite. You can use alchemy.is_mysql() to get this
+    is_sql -- adjusts syntax based on if we are committing to MySQL or SQLite. You can use alchemy.is_sql() to get this
     commit_frequency -- tune this for speed. Runs "session.commit" every `commit_frequency` items
     """
-    if is_mysql:
-        ignore_prefix = ("IGNORE",)
-        session.execute("set foreign_key_checks = 0; set unique_checks = 0;")
+    if dbtype == "mysql" or dbtype == "postgres":
+        if dbtype == "mysql":
+            ignore_prefix = ("IGNORE",)
+            session.execute("set foreign_key_checks = 0; set unique_checks = 0;")
+        #else:
+        #    test = " ALTER TABLE {0} DISABLE TRIGGER ALL;".format(table.__table__.name)
+        #    print (test)
+            #session.execute("ALTER TABLE {0} DISABLE TRIGGER ALL;".format(table.__table__.name))
         session.commit()
     else:
         ignore_prefix = ("OR IGNORE",)
-    numgroups = len(insert_statements) / commit_frequency
+    numgroups = int(len(insert_statements) / commit_frequency)
     for ng in range(numgroups):
         if numgroups == 0:
             break
+
         chunk = insert_statements[ng*commit_frequency:(ng+1)*commit_frequency]
-        session.connection().execute(table.insert(prefixes=ignore_prefix), chunk)
-        print "committing chunk",ng+1,"of",numgroups,"with length",len(chunk),"at",datetime.now()
+        if dbtype == "mysql": 
+            session.connection().execute(table.insert(prefixes=ignore_prefix), chunk)
+        else:
+            session.connection().execute(table.insert(), chunk)
+        print ("committing chunk",ng+1,"of",numgroups,"with length",len(chunk),"at",datetime.now())
         session.commit()
     last_chunk = insert_statements[numgroups*commit_frequency:]
+ 
+    #last_chunk = [{'type': '2', 'id': '84236a434e2969fbb3ea25dc5fcd76a'}]
+    
+    print(last_chunk[0:200])
+    
     if last_chunk:
-        print "committing last",len(last_chunk),"records at",datetime.now()
-        session.connection().execute(table.insert(prefixes=ignore_prefix), last_chunk)
-        session.commit()
+        print ("committing last",len(last_chunk),"records at",datetime.now())
+        if dbtype == "mysql":
+            session.connection().execute(table.insert(prefixes=ignore_prefix), last_chunk)
+        else:
+            session.execute(table.insert(), last_chunk)
+               # if dbtype == "postgres":
+        #test = " ALTER TABLE {0} ENABLE TRIGGER ALL;".format(table.__table__)
+        #session.execute(" ALTER TABLE {0} ENABLE TRIGGER ALL;".format(table.__table__.name))
+
+    session.commit()
 
 def commit_updates(session, update_key, update_statements, table, commit_frequency = 1000):
     """
@@ -91,16 +108,16 @@ def commit_updates(session, update_key, update_statements, table, commit_frequen
     primary_key = table.primary_key.columns.values()[0]
     update_key = table.columns[update_key]
     u = table.update().where(primary_key==bindparam('pk')).values({update_key: bindparam('update')})
-    numgroups = len(update_statements) / commit_frequency
+    numgroups = int(len(update_statements) / commit_frequency)
     for ng in range(numgroups):
         if numgroups == 0:
             break
         chunk = update_statements[ng*commit_frequency:(ng+1)*commit_frequency]
         session.connection().execute(u, *chunk)
-        print "committing chunk",ng+1,"of",numgroups,"with length",len(chunk),"at",datetime.now()
+        print ("committing chunk",ng+1,"of",numgroups,"with length",len(chunk),"at",datetime.now())
         session.commit()
     last_chunk = update_statements[numgroups*commit_frequency:]
     if last_chunk:
-        print "committing last",len(last_chunk),"records at",datetime.now()
+        print ("committing last",len(last_chunk),"records at",datetime.now())
         session.connection().execute(u, *last_chunk)
         session.commit()

@@ -30,16 +30,21 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Parses the process.cfg file
 """
 import importlib
-from ConfigParser import ConfigParser
+from configparser import ConfigParser
 
 defaults = {'parse': 'defaultparse',
             'clean': 'True',
             'consolidate': 'True',
-            'datadir': '/data/patentdata/patents/2013',
+            'datadir': './data/',
             'grantregex': 'ipg\d{6}.xml',
             'applicationregex': 'ipa\d{6}.xml',
             'years': None,
-            'downloaddir' : None}
+            'downloaddir' : None,
+            'downloaddirapps' : None,
+            'downloaddirgrants' : None,
+            'urlgrants' : None,
+            'urlapps' : None
+            }
 
 def extract_process_options(handler, config_section):
     """
@@ -64,6 +69,10 @@ def extract_parse_options(handler, config_section):
     options['applicationregex'] = handler.get(config_section, 'applicationregex')
     options['years'] = handler.get(config_section,'years')
     options['downloaddir'] = handler.get(config_section,'downloaddir')
+    options['downloaddirapps'] = handler.get(config_section,'downloaddirapps')
+    options['downloaddirgrants'] = handler.get(config_section,'downloaddirgrants')
+    options['urlapps'] = handler.get(config_section,'urlapps')
+    options['urlgrants'] = handler.get(config_section,'urlgrants')
     if options['years'] and options['downloaddir']:
         options['datadir'] = options['downloaddir']
     return options
@@ -74,7 +83,7 @@ def get_config_options(configfile):
     two dicts representing the process and parse configuration options.
     See `process.cfg` for explanation of the optiosn
     """
-    handler = ConfigParser(defaults)
+    handler = ConfigParser(defaults,allow_no_value=True)
     try:
         handler.read(configfile)
     except IOError:
@@ -117,11 +126,12 @@ def get_xml_handlers(configfile, document_type='grant'):
     xmlhandlers = {}
     config_item = 'grant-xml-handlers' if document_type == 'grant' \
                    else 'application-xml-handlers'
-    for yearrange, handler in handler.items(config_item):
+    for yearrange, value in handler.items(config_item):
         for year in get_dates(yearrange):
+            
             try:
-                xmlhandlers[year] = importlib.import_module(handler)
+                xmlhandlers[year] = importlib.import_module(value)
             except:
                 importlib.sys.path.append('..')
-                xmlhandlers[year] = importlib.import_module(handler)
+                xmlhandlers[year] = importlib.import_module(value)
     return xmlhandlers

@@ -33,18 +33,17 @@ Uses the extended ContentHandler from xml_driver to extract the needed fields
 from patent grant documents
 """
 
-from cStringIO import StringIO
+from io import StringIO
 from datetime import datetime
 from unidecode import unidecode
-from handler import Patobj, PatentHandler
-import re
+from lib.handlers.handler import PatentHandler
+import regex as re
 import uuid
 import xml.sax
-import xml_util
-import xml_driver
+from lib.handlers import xml_util
+from lib.handlers import xml_driver
 
 claim_num_regex = re.compile(r'^\d+\. *') # removes claim number from claim text
-
 
 class Patent(PatentHandler):
 
@@ -66,11 +65,9 @@ class Patent(PatentHandler):
                           'claims']
 
         self.xml = xh.root.patent_application_publication
-
-        if filter(lambda x: not isinstance(x, list), self.xml.contents_of('country_code')):
-            self.country = filter(lambda x: not isinstance(x, list), self.xml.contents_of('country_code'))[0]
-        else:
-            self.country = ''
+        
+        self.country = self.xml.division_of.contents_of('country_code')[0]
+        
         self.application = xml_util.normalize_document_identifier(self.xml.document_id.contents_of('doc_number')[0])
         self.kind = self.xml.document_id.contents_of('kind_code')[0]
         self.pat_type = None
@@ -137,7 +134,7 @@ class Patent(PatentHandler):
             datestring = datetime.strptime(datestring, '%Y%m%d')
             return datestring
         except Exception as inst:
-            print inst, datestring
+            print (inst, datestring)
             return None
 
     @property
@@ -215,7 +212,7 @@ class Patent(PatentHandler):
                 loc[tag] = applicant.residence.contents_of(tag, as_string=True, upper=False)
             loc['country'] = app['nationality']
             #this is created because of MySQL foreign key case sensitivities
-            loc['id'] = unidecode("|".join([loc['city'], loc['state'], loc['country']]).lower())
+            loc['id'] = "|".join([loc['city'], loc['state'], loc['country']]).lower()
             del app['nationality']
             if any(app.values()) or any(loc.values()):
                 app['sequence'] = i

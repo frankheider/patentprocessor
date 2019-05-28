@@ -23,7 +23,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-import re
+import regex as re
 from bs4 import BeautifulSoup
 import unicodedata
 import Levenshtein as leven
@@ -40,7 +40,8 @@ def concatenate_location(city, state, country):
     location = ", ".join(location_list)
     return location
 
-remove_eol_pattern = re.compile(ur'[\r\n]+')
+remove_eol_pattern = re.compile(r'[\r\n]+')
+
 
 #Many accent references are difficult to idenity programmatically.
 #These are handled by manually replacing each entry.
@@ -59,7 +60,7 @@ def generate_manual_patterns_and_replacements(library_file_name):
         #Parse the substitution line
         line_without_newline = remove_eol_pattern.sub('',line)
         line_split = line_without_newline.split("|")
-        mappings.append((line_split[0],line_split[1].decode('utf-8')))
+        mappings.append((line_split[0],line_split[1]))
 
     generated_patterns = list()
     generated_replacements = list()
@@ -67,9 +68,9 @@ def generate_manual_patterns_and_replacements(library_file_name):
     length = len(mappings)
     while True:
         map_slice = mappings[i*100:(i+1)*100-1]
-        generated_pattern_list = '|'.join('(%s)' % re.escape(p) for p, r in map_slice) 
+        generated_pattern_list = '|'.join('(%s)' % re.escape(p) for p, _r in map_slice) 
         generated_patterns.append(re.compile(generated_pattern_list, re.UNICODE))
-        replacement_list = [replacement for pattern, replacement in map_slice]
+        replacement_list = [replacement for _pattern, replacement in map_slice]
         generated_replacements.append(lambda m: replacement_list[m.lastindex-1])
         i+=1
         if (i+1)*100>=length:
@@ -92,7 +93,7 @@ def generate_manual_patterns_and_replacements(library_file_name):
 def get_chars_in_parentheses(text):
     text = text.group(0)
     #match text surrounded by parentheses
-    pattern = re.compile(ur'(?<=\().*?(?=\))', re.UNICODE)
+    pattern = re.compile(r'(?<=\().*?(?=\))', re.UNICODE)
     match = pattern.search(text)
     try:
         match = match.group(0)
@@ -108,45 +109,45 @@ def get_chars_in_parentheses(text):
 #These patterns perform quick fixes which let us parse the data
 
 def generate_quickfix_patterns():
-    curly_pattern = re.compile(ur'\{.*?\}',re.UNICODE)
-    quickfix_slashes = re.compile(ur'/[a-zA-Z]/',re.UNICODE)
+    curly_pattern = re.compile(r'\{.*?\}',re.UNICODE)
+    quickfix_slashes = re.compile(r'/[a-zA-Z]/',re.UNICODE)
     return {'curly':curly_pattern, 'slashes':quickfix_slashes}
 
 manual_patterns, manual_replacements = generate_manual_patterns_and_replacements("lib/manual_replacement_library.txt")
 quickfix_patterns = generate_quickfix_patterns()
-postal_pattern = re.compile(ur'(- )?[A-Z\-#\(]*\d+[\)A-Z]*', re.UNICODE)
-foreign_postal_pattern = re.compile(ur'[A-Z\d]{3,4}[ ]?[A-Z\d]{3}', re.UNICODE)
+postal_pattern = re.compile(r'(- )?[A-Z\-#\(]*\d+[\)A-Z]*', re.UNICODE)
+foreign_postal_pattern = re.compile(r'[A-Z\d]{3,4}[ ]?[A-Z\d]{3}', re.UNICODE)
 
-separator_pattern = re.compile(ur'\|', re.UNICODE)
+separator_pattern = re.compile(r'\|', re.UNICODE)
 
 #Remove unnecessary symbols|whitespace in excess of one space|
 #start of line symbols
-unnecessary_symbols_pattern = re.compile(ur'[#\(?<!.\)]')
-excess_whitespace_pattern = re.compile(ur'(?<= )( )+')
-start_of_line_removal_pattern = re.compile(ur'^(late of|LATE OF)?[\-,/:;_& ]*', re.MULTILINE)
+unnecessary_symbols_pattern = re.compile(r'[#\(?<!.\)]')
+excess_whitespace_pattern = re.compile(r'(?<= )( )+')
+start_of_line_removal_pattern = re.compile(r'^(late of|LATE OF)?[\-,/:;_& ]*', re.MULTILINE)
 #A single letter followed by non-letters is unlikely to be useful information
 #More likely, it is what remains of other removals, such as streets and addresses
-start_of_line_letter_removal_pattern = re.compile(ur'^( )*[A-Za-z][\-, ]+', re.MULTILINE)
-extra_commas_pattern = re.compile(ur'(( )*,( )*)+')
+start_of_line_letter_removal_pattern = re.compile(r'^( )*[A-Za-z][\-, ]+', re.MULTILINE)
+extra_commas_pattern = re.compile(r'(( )*,( )*)+')
 
-england_pattern = re.compile(ur', EN')
-germany_pattern = re.compile(ur', DT')
-japan_pattern = re.compile(ur', JA')
-russia_pattern = re.compile(ur', SU')
+england_pattern = re.compile(r', EN')
+germany_pattern = re.compile(r', DT')
+japan_pattern = re.compile(r', JA')
+russia_pattern = re.compile(r', SU')
 
 #Input: a raw location from the parse of the patent data
 def clean_raw_location(text):
     text = remove_eol_pattern.sub('', text)
     text = separator_pattern.sub(', ', text)
     #Perform all of the manual replacements
-    i=0
+    _i=0
     text = perform_replacements(manual_patterns, manual_replacements, text)
     #Perform all the quickfix replacements
     text = quickfix_patterns['curly'].sub(get_chars_in_parentheses, text)
     
     #Turn accents into unicode
-    soup = BeautifulSoup(text)
-    text = unicode(soup.get_text())
+    soup = BeautifulSoup(text,"lxml")
+    text = str(soup.get_text())
     text =  unicodedata.normalize('NFC', text)
     
     text = foreign_postal_pattern.sub('', text)
@@ -166,7 +167,7 @@ def clean_raw_location(text):
 
 def perform_replacements(generated_patterns, replacement_function, text):
     length = len(generated_patterns)
-    for i in xrange(length):
+    for i in range(length):
         text = generated_patterns[i].sub(replacement_function[i],text)
     return text
 

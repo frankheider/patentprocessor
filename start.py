@@ -26,22 +26,34 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 @author Gabe Fierro gt.fierro@berkeley.edu github.com/gtfierro
 """
-import re
 import os
 import sys
 import parse
 import time
-import itertools
+
 import datetime
 import logging
+import threading
 import requests
+import queue
 import zipfile
-import cStringIO as StringIO
+import codecs
+
+from lib.config_parser import get_config_options
+
 from bs4 import BeautifulSoup as bs
-import lib.alchemy as alchemy
+
+from lib.assignee_disambiguation import run_disambiguation as ass_disambiguation  
+from lib.lawyer_disambiguation import run_disambiguation as law_disambiguation
+from lib.geoalchemy import run_geo
+from consolidate import consolidate
 
 sys.path.append('lib')
-from config_parser import get_config_options
+
+headers = {
+'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'
+}
+
 
 logfile = "./" + 'xml-parsing.log'
 logging.basicConfig(filename=logfile, level=logging.DEBUG)
@@ -66,72 +78,145 @@ def get_year_list(yearstring):
         years.extend(range(start,end))
     return years
 
-def generate_download_list(years, doctype='grant'):
+def generate_download_list(year, doctype='grant'):
     """
     Given the year string from the configuration file, return
     a list of urls to be downloaded
     """
-    if not years: return []
+    """
+    logging.basicConfig() 
+    logging.getLogger().setLevel(logging.DEBUG)
+    requests_log = logging.getLogger("requests.packages.urllib3")
+    requests_log.setLevel(logging.DEBUG)
+    requests_log.propagate = True
+    """
     urls = []
-    link = 'https://www.google.com/googlebooks/uspto-patents-grants-text.html'
+     
+    if doctype == 'grant':
+        url = parse_config['urlgrants'] + '/' + str(year)
     if doctype == 'application':
-        link = 'https://www.google.com/googlebooks/uspto-patents-applications-text.html'
-    url = requests.get(link)
-    soup = bs(url.content)
-    years = get_year_list(years)
+        url = parse_config['urlapps'] + '/' + str(year)
 
-    # latest file link
-    if 'latest' in years:
-        a = soup.h3.findNext('h3').findPrevious('a')
-        urls.append(a['href'])
-        years.remove('latest')
-    # get year links
-    for year in years:
-        header = soup.find('h3', {'id': str(year)})
-        a = header.findNext()
-        while a.name != 'h3':
-            urls.append(a['href'])
-            a = a.findNext()
-    return urls
+    ext_list = ['tar', 'TAR', 'zip', 'ZIP','doc','DOC']
+   
+      
+    print (str(year) + ' ' + doctype + ' from ' + url)
 
-def download_files(urls):
-    """
-    [downloaddir]: string representing base download directory. Will download
-    files to this directory in folders named for each year
-    Returns: False if files were not downloaded or if there was some error,
-    True otherwise
-    """
-    import os
-    import requests
-    import zipfile
-    import cStringIO as StringIO
-    if not (downloaddir and urls): return False
-    complete = True
-    print 'downloading to',downloaddir
-    for url in urls:
-        filename = url.split('/')[-1].replace('zip','xml')
-        if filename in os.listdir(downloaddir):
-            print 'already have',filename
-            continue
-        print 'downloading',url
-        try:
-            r = requests.get(url)
-            z = zipfile.ZipFile(StringIO.StringIO(r.content))
-            print 'unzipping',filename
-            z.extractall(downloaddir)
-        except:
-            print 'ERROR: downloading or unzipping',filename
-            complete = False
-            continue
-    return complete
+    session = requests.Session()
+    session.trust_env = False
+    page = session.get(url, headers=headers)
+    soup = bs(page.content, "html.parser")
+    for ext in ext_list:
+        urls += [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
+    print (urls)
+
+    return (urls)
+
+#Downloader class - reads queue and downloads each file in succession
+class Downloader(threading.Thread):
+    """Threaded File Downloader"""
+
+    def __init__(self, lqueue, output_directory):
+        threading.Thread.__init__(self,name=codecs.encode(os.urandom(16), 'hex').decode())
+        self.queue = lqueue
+        self.output_directory = output_directory
+  
+    def run(self):
+        while True:
+            # gets the url from the queue
+            url = self.queue.get()
+ 
+            # download the file
+            print ("* Thread " + self.name + " - processing URL")
+            self.download_file(url)
+  
+            # send a signal to the queue that the job is done
+            self.queue.task_done()
+ 
+    def download_file(self, url):
+        t_start = time.clock()
+
+        session = requests.Session()
+        session.trust_env = False
+        r = session.get(url, stream=True)
+
+        if (r.status_code == 200):
+            fname = os.path.basename(url)
+            if fname in os.listdir(self.output_directory):
+                print ('already have ',fname)
+                filesize = int(r.headers['Content-length'])
+                filesize_is = int(os.path.getsize (self.output_directory + "/" + fname))
+                if filesize == filesize_is:
+                    print ('same size skipping download',filesize)
+                    return
+                else:
+                    print ("differnd size (is: %10d expected %10d) removing and continue...." % (filesize_is, filesize))
+                    os.remove(self.output_directory + "/" + fname)
+
+            
+            fname = self.output_directory + "/" + os.path.basename(url)
+
+            filesize = int(r.headers['Content-length'])
+            print ("Downloading: %s Bytes: %s" % (url, filesize))
+            handle = open(fname, "wb")
+            filesize_dl = 0
+            progress_s = 100
+            for chunk in r.iter_content(chunk_size=200*1024):
+                filesize_dl += len(chunk)
+            
+                if chunk:  # filter out keep-alive new chunks
+                    handle.write(chunk)
+                    progress = filesize_dl * 100. / filesize
+                    if int(progress_s) != int(progress):
+                        status = r"%10d  [%3.2f%%]" % (filesize_dl, filesize_dl * 100. / filesize)
+                        status = time.strftime("%H:%M:%S") + ' ' + fname + ' ' + status + chr(8)*(len(status)+1)
+                        print (status)
+                        progress_s = int(progress)  
+            t_elapsed = time.clock() - t_start  
+            print ("Done * Thread: " + self.name + " Downloaded " + url + " in " + str(filesize/t_elapsed) + " bytes/sec")                       
+        else:
+            print ("* Thread: " + self.name + " Bad URL: " + url)
+ 
+# Spawns dowloader threads and manages URL downloads queue
+class DownloadManager():
+
+    def __init__(self, download_dict, output_directory, thread_count=5):
+        self.thread_count = thread_count
+        self.download_dict = download_dict
+        self.output_directory = output_directory
+
+    # Start the downloader threads, fill the queue with the URLs and
+    # then feed the threads URLs via the queue
+    def begin_downloads(self):
+        q = queue.Queue ()
+    
+        # Create a thread pool and give them a queue
+        for _i in range(self.thread_count):
+            t = Downloader(q, self.output_directory)
+            t.setDaemon(True)
+            t.start()
+ 
+        # Load the queue from the download dict
+        for linkname in self.download_dict:
+            print (linkname)
+            q.put(self.download_dict[linkname])
+ 
+        # Wait for the queue to finish
+        q.join()
+ 
+        return
+
+def run_unzip (download_dict, output_directory):
+
+    for zipname in download_dict:
+        fn = os.path.basename(zipname)    
+        z = zipfile.ZipFile(output_directory+ '/' + fn)
+        print ('unzipping ',output_directory+ '/' + fn)
+        z.extractall(output_directory+ '/tmp')
+
 
 def run_parse(files, doctype='grant'):
-    import parse
-    import time
-    import sys
-    import itertools
-    import lib.alchemy as alchemy
-    import logging
+
     logfile = "./" + 'xml-parsing.log'
     logging.basicConfig(filename=logfile, level=logging.DEBUG)
     parse.parse_files(files, doctype)
@@ -139,14 +224,14 @@ def run_parse(files, doctype='grant'):
 def run_clean(process_config):
     if not process_config['clean']:
         return
-    doctype = process_config['doctype']
+    _doctype = process_config['doctype']
     command = 'bash run_clean.sh'
     os.system(command)
 
 def run_consolidate(process_config):
     if not process_config['consolidate']:
         return
-    doctype = process_config['doctype']
+    _doctype = process_config['doctype']
     # TODO: optionally include previous disambiguation
     command = 'bash run_consolidation.sh'
     os.system(command)
@@ -161,40 +246,79 @@ if __name__=='__main__':
     doctype = process_config['doctype']
 
     # download the files to be parsed
-    urls = []
+ 
+    doctype_list = []
     should_process_grants = doctype in ['all', 'grant']
     should_process_applications = doctype in ['all', 'application']
-    if should_process_grants:
-        urls += generate_download_list(parse_config['years'], 'grant')
-    if should_process_applications:
-        urls += generate_download_list(parse_config['years'], 'application')
-    downloaddir = parse_config['downloaddir']
-    if downloaddir and not os.path.exists(downloaddir):
-        os.makedirs(downloaddir)
-    print 'Downloading files at {0}'.format(str(datetime.datetime.today()))
-    download_files(urls)
-    print 'Downloaded files:',parse_config['years']
-    f = datetime.datetime.now()
-    print 'Finished downloading in {0}'.format(str(f-s))
 
-    # find files
-    print "Starting parse on {0} on directory {1}".format(str(datetime.datetime.today()),parse_config['datadir'])
-    if should_process_grants:
-        files = parse.list_files(parse_config['datadir'],parse_config['grantregex'])
-        print 'Running grant parse...'
-        run_parse(files, 'grant')
-        f = datetime.datetime.now()
-        print "Found {2} files matching {0} in directory {1}"\
-                .format(parse_config['grantregex'], parse_config['datadir'], len(files))
     if should_process_applications:
-        files = parse.list_files(parse_config['datadir'],parse_config['applicationregex'])
-        print 'Running application parse...'
-        run_parse(files, 'application')
-        f = datetime.datetime.now()
-        print "Found {2} files matching {0} in directory {1}"\
-                .format(parse_config['applicationregex'], parse_config['datadir'], len(files))
-    print 'Finished parsing in {0}'.format(str(f-s))
+        doctype_list.extend (['application'])
+    if should_process_grants:
+        doctype_list.extend (['grant'])
 
-    # run extra phases if needed
-    run_clean(process_config)
-    run_consolidate(process_config)
+
+    print (doctype_list)
+
+    years = parse_config['years'] 
+    years = get_year_list(years)
+
+    print (years)
+    if 'latest' in years:
+        years.remove('latest')
+
+    for dt in doctype_list:
+        for year in years:
+            urls = generate_download_list(year, dt)
+            if dt == 'grant':        
+                downloaddir = parse_config['downloaddirgrants'] + '/' + str(year)
+            if dt == 'application':        
+                downloaddir = parse_config['downloaddirapps'] + '/' + str(year)
+            print ("downloading to " + downloaddir)
+
+            if downloaddir and not os.path.exists(downloaddir):
+                os.makedirs(downloaddir)
+            
+            print ('Downloading files at {0}'.format(str(datetime.datetime.today())))
+
+            download_dict = {}
+
+            for f in urls:
+                download_dict[str(f)] = f
+            if len(download_dict) is 0:
+                print ("* No URLs to download -> EXIT")
+                sys.exit(2)
+
+            #download_manager = DownloadManager(download_dict, downloaddir, 10)
+            #download_manager.begin_downloads()
+            #run_unzip(download_dict, downloaddir)
+    
+            f = datetime.datetime.now()
+            print ('Finished downloading in {0}'.format(str(f-s)))
+ 
+#        find files
+            print ("Starting parse on {0} on directory {1}".format(str(datetime.datetime.today()),parse_config['downloaddirgrants'] + '/' + str(year)))
+            if should_process_grants:
+                files = parse.list_files(parse_config['downloaddirgrants'] + '/' + str(year) + '/tmp',parse_config['grantregex'])
+                print ('Running grant parse...')
+                run_parse(files, 'grant')
+                f = datetime.datetime.now()
+                print ("Found {2} files matching {0} in directory {1}"\
+                         .format(parse_config['grantregex'], parse_config['downloaddirgrants'], len(files)))
+            if should_process_applications:
+                files = parse.list_files(parse_config['downloaddirapps']  + '/' + str(year) + '/tmp' ,parse_config['applicationregex'])
+                print ('Running application parse...')
+                run_parse(files, 'application')
+                f = datetime.datetime.now()
+                print ("Found {2} files matching {0} in directory {1}"\
+                         .format(parse_config['applicationregex'], parse_config['downloaddirapps'], len(files)))
+            print ('Finished parsing in {0}'.format(str(f-s)))
+     
+    ass_disambiguation ()
+         
+    for dt in doctype_list:
+        law_disambiguation (dt)
+    run_geo (doctype = 'grant')
+    
+#     #run_clean(process_config)
+#     for year in years:
+#         consolidate(year='2019', doctype = 'grant')

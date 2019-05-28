@@ -37,23 +37,25 @@ from sqlalchemy.orm import deferred, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.schema import MetaData
-from unidecode import unidecode
 
 from sqlalchemy import Table
-import schema_func
+
+import lib.alchemy.schema_func
 
 cascade = "all, delete, delete-orphan"
 
 def init(self, *args, **kwargs):
     for i, arg in enumerate(args):
         self.__dict__[self.kw[i]] = arg
-    for k, v in kwargs.iteritems():
+    for k, v in kwargs.items():
         self.__dict__[k] = v
 
 grantmetadata = MetaData()
 appmetadata = MetaData()
+
 GrantBase = declarative_base(metadata=grantmetadata)
 ApplicationBase = declarative_base(metadata=appmetadata)
+
 GrantBase.__init__ = init
 ApplicationBase.__init__ = init
 
@@ -67,7 +69,7 @@ patentassignee = Table(
     'patent_assignee', GrantBase.metadata,
     Column('patent_id', Unicode(20), ForeignKey('patent.id')),
     Column('assignee_id', Unicode(36), ForeignKey('assignee.id')))
-
+    
 patentinventor = Table(
     'patent_inventor', GrantBase.metadata,
     Column('patent_id', Unicode(20), ForeignKey('patent.id')),
@@ -88,9 +90,8 @@ locationinventor = Table(
     Column('location_id', Unicode(256), ForeignKey('location.id')),
     Column('inventor_id', Unicode(36), ForeignKey('inventor.id')))
 
+    
 # PATENT ---------------------------
-
-
 class Patent(GrantBase):
     __tablename__ = "patent"
     id = Column(Unicode(20), primary_key=True)
@@ -179,7 +180,7 @@ class Application(GrantBase):
         primaryjoin="Application.id == USApplicationCitation.application_id",
         foreign_keys="USApplicationCitation.application_id",
         backref="application", cascade=cascade)
-    __table_args__ = (
+    __table  = (
         Index("app_idx1", "type", "number"),
         Index("app_idx2", "date"),
     )
@@ -197,8 +198,8 @@ class RawLocation(GrantBase):
     __tablename__ = "rawlocation"
     id = Column(Unicode(256), primary_key=True)
     location_id = Column(Unicode(256), ForeignKey("location.id"))
-    city = Column(Unicode(128))
-    state = Column(Unicode(20), index=True)
+    city = Column(Unicode(256))
+    state = Column(Unicode(64), index=True)
     country = Column(Unicode(10), index=True)
     rawinventors = relationship("RawInventor", backref="rawlocation")
     rawassignees = relationship("RawAssignee", backref="rawlocation")
@@ -258,14 +259,14 @@ class RawLocation(GrantBase):
     # ----------------------------------
 
     def __repr__(self):
-        return "<RawLocation('{0}')>".format(unidecode(self.address))
+        return "<RawLocation('{0}')>".format(str(self.address))
 
 
 class Location(GrantBase):
     __tablename__ = "location"
     id = Column(Unicode(256), primary_key=True)
-    city = Column(Unicode(128))
-    state = Column(Unicode(20), index=True)
+    city = Column(Unicode(256))
+    state = Column(Unicode(64), index=True)
     country = Column(Unicode(10), index=True)
     latitude = Column(Float)
     longitude = Column(Float)
@@ -352,13 +353,23 @@ class Location(GrantBase):
         if "longitude" in kwargs:
             self.longitude = kwargs["longitude"]
 
+
+def fetch(clean, matchSet, session, default):
+    """
+    Takes the values in the existing parameter.
+    If all the tests in matchset pass, it returns
+    the object related to it.
+
+    if the params in default refer to an instance that exists,
+    return it!
+    """
+
+    return None
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             Location,
-            [["id"],
-             ["city", "state", "country"],
-             ["longitude", "latitude"]],
+            [["id"],["city", "state", "country"],["longitude", "latitude"]],
             session, default)
 
     # ----------------------------------
@@ -431,7 +442,7 @@ class RawAssignee(GrantBase):
             return_string = self.organization
         else:
             return_string = u"{0} {1}".format(self.name_first, self.name_last)
-        return "<RawAssignee('{0}')>".format(unidecode(return_string))
+        return "<RawAssignee('{0}')>".format(str(return_string))
 
 
 class RawInventor(GrantBase):
@@ -489,7 +500,7 @@ class RawInventor(GrantBase):
             last=self.name_last)
 
     def __repr__(self):
-        return "<RawInventor('{0}')>".format(unidecode(self.name_full))
+        return "<RawInventor('{0}')>".format(str(self.name_full))
 
 
 class RawLawyer(GrantBase):
@@ -499,7 +510,7 @@ class RawLawyer(GrantBase):
     patent_id = Column(Unicode(20), ForeignKey("patent.id"))
     name_first = Column(Unicode(64))
     name_last = Column(Unicode(64))
-    organization = Column(Unicode(64))
+    organization = Column(Unicode(256))
     country = Column(Unicode(10))
     sequence = Column(Integer, index=True)
 
@@ -550,7 +561,7 @@ class RawLawyer(GrantBase):
             data.append("{0} {1}".format(self.name_first, self.name_last))
         if self.organization:
             data.append(self.organization)
-        return "<RawLawyer('{0}')>".format(unidecode(", ".join(data)))
+        return "<RawLawyer('{0}')>".format(str(", ".join(data)))
 
 
 # DISAMBIGUATED -----------------------
@@ -637,7 +648,7 @@ class Assignee(GrantBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             Assignee,
             [["id"]],
             session, default)
@@ -649,7 +660,7 @@ class Assignee(GrantBase):
             return_string = self.organization
         else:
             return_string = u"{0} {1}".format(self.name_first, self.name_last)
-        return "<Assignee('{0}')>".format(unidecode(return_string))
+        return "<Assignee('{0}')>".format(str(return_string))
 
 
 class Inventor(GrantBase):
@@ -722,7 +733,7 @@ class Inventor(GrantBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             Inventor,
             [["id"]],
             session, default)
@@ -730,7 +741,7 @@ class Inventor(GrantBase):
     # ----------------------------------
 
     def __repr__(self):
-        return "<Inventor('{0}')>".format(unidecode(self.name_full))
+        return "<Inventor('{0}')>".format(str(self.name_full))
 
 
 class Lawyer(GrantBase):
@@ -738,7 +749,7 @@ class Lawyer(GrantBase):
     id = Column(Unicode(36), primary_key=True)
     name_first = Column(Unicode(64))
     name_last = Column(Unicode(64))
-    organization = Column(Unicode(64))
+    organization = Column(Unicode(256))
     country = Column(Unicode(10))
     rawlawyers = relationship("RawLawyer", backref="lawyer")
 
@@ -805,7 +816,7 @@ class Lawyer(GrantBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             Lawyer,
             [["id"],
              ["organization"],
@@ -820,7 +831,7 @@ class Lawyer(GrantBase):
             data.append(self.name_full)
         if self.organization:
             data.append(self.organization)
-        return "<Lawyer('{0}')>".format(unidecode(", ".join(data)))
+        return "<Lawyer('{0}')>".format(str(", ".join(data)))
 
 
 # CLASSIFICATIONS ------------------
@@ -830,8 +841,8 @@ class USPC(GrantBase):
     __tablename__ = "uspc"
     uuid = Column(Unicode(36), primary_key=True)
     patent_id = Column(Unicode(20), ForeignKey("patent.id"))
-    mainclass_id = Column(Unicode(10), ForeignKey("mainclass.id"))
-    subclass_id = Column(Unicode(10), ForeignKey("subclass.id"))
+    mainclass_id = Column(Unicode(20), ForeignKey("mainclass.id"))
+    subclass_id = Column(Unicode(20), ForeignKey("subclass.id"))
     sequence = Column(Integer, index=True)
 
     def __repr__(self):
@@ -944,7 +955,7 @@ class OtherReference(GrantBase):
     sequence = Column(Integer)
 
     def __repr__(self):
-        return "<OtherReference('{0}')>".format(unidecode(self.text[:20]))
+        return "<OtherReference('{0}')>".format(str(self.text[:20]))
 
 
 class USRelDoc(GrantBase):
@@ -983,7 +994,7 @@ applicationassignee = Table(
     'application_assignee', ApplicationBase.metadata,
     Column('application_id', Unicode(20), ForeignKey('application.id')),
     Column('assignee_id', Unicode(36), ForeignKey('assignee.id')))
-
+  
 applicationinventor = Table(
     'application_inventor', ApplicationBase.metadata,
     Column('application_id', Unicode(20), ForeignKey('application.id')),
@@ -1060,8 +1071,8 @@ class App_RawLocation(ApplicationBase):
     __tablename__ = "rawlocation"
     id = Column(Unicode(256), primary_key=True)
     location_id = Column(Unicode(256), ForeignKey("location.id"))
-    city = Column(Unicode(128))
-    state = Column(Unicode(20), index=True)
+    city = Column(Unicode(256))
+    state = Column(Unicode(64), index=True)
     country = Column(Unicode(10), index=True)
     rawinventors = relationship("App_RawInventor", backref="rawlocation")
     rawassignees = relationship("App_RawAssignee", backref="rawlocation")
@@ -1121,14 +1132,14 @@ class App_RawLocation(ApplicationBase):
     # ----------------------------------
 
     def __repr__(self):
-        return "<RawLocation('{0}')>".format(unidecode(self.address))
+        return "<RawLocation('{0}')>".format(str(self.address))
 
 
 class App_Location(ApplicationBase):
     __tablename__ = "location"
     id = Column(Unicode(256), primary_key=True)
-    city = Column(Unicode(128))
-    state = Column(Unicode(20), index=True)
+    city = Column(Unicode(256))
+    state = Column(Unicode(64), index=True)
     country = Column(Unicode(10), index=True)
     latitude = Column(Float)
     longitude = Column(Float)
@@ -1217,7 +1228,7 @@ class App_Location(ApplicationBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             App_Location,
             [["id"],
              ["city", "state", "country"],
@@ -1294,7 +1305,7 @@ class App_RawAssignee(ApplicationBase):
             return_string = self.organization
         else:
             return_string = u"{0} {1}".format(self.name_first, self.name_last)
-        return "<RawAssignee('{0}')>".format(unidecode(return_string))
+        return "<RawAssignee('{0}')>".format(str(return_string))
 
 
 class App_RawInventor(ApplicationBase):
@@ -1352,12 +1363,74 @@ class App_RawInventor(ApplicationBase):
             last=self.name_last)
 
     def __repr__(self):
-        return "<RawInventor('{0}')>".format(unidecode(self.name_full))
+        return "<RawInventor('{0}')>".format(str(self.name_full))
 
 
 # DISAMBIGUATED -----------------------
+"""
+class App_RawLawyer(ApplicationBase):
+    __tablename__ = "lawyer"
+    uuid = Column(Unicode(36), primary_key=True)
+    lawyer_id = Column(Unicode(36), ForeignKey("lawyer.id"))
+    patent_id = Column(Unicode(20), ForeignKey("patent.id"))
+    name_first = Column(Unicode(64))
+    name_last = Column(Unicode(64))
+    organization = Column(Unicode(64))
+    country = Column(Unicode(10))
+    sequence = Column(Integer, index=True)
+
+    @hybrid_property
+    def name_full(self):
+        return u"{first} {last}".format(
+            first=self.name_first,
+            last=self.name_last)
+
+    # -- Functions for Disambiguation --
+
+    @hybrid_property
+    def summarize(self):
+        return {
+            "name_first": self.name_first,
+            "name_last": self.name_last,
+            "organization": self.organization,
+            "country": self.country}
+
+    @hybrid_property
+    def __clean__(self):
+        return self.lawyer
+
+    @hybrid_property
+    def __related__(self):
+        return Lawyer
+
+    def unlink(self, session):
+        clean = self.__clean__
+        pats = [obj.patent_id for obj in clean.__raw__ if obj.patent_id == self.patent_id]
+        if len(pats) == 1:
+            session.query(patentlawyer).filter(
+                patentlawyer.c.patent_id == self.patent_id).delete(
+                    synchronize_session=False)
+        session.query(RawLawyer).filter(
+            RawLawyer.uuid == self.uuid).update(
+                {RawLawyer.lawyer_id: None},
+                synchronize_session=False)
+        if len(clean.__raw__) == 0:
+            session.delete(clean)
+        session.commit()
+
+    # ----------------------------------
+
+    def __repr__(self):
+        data = []
+        if self.name_first:
+            data.append("{0} {1}".format(self.name_first, self.name_last))
+        if self.organization:
+            data.append(self.organization)
+        return "<RawLawyer('{0}')>".format(unidecode(", ".join(data)))
 
 
+
+"""
 class App_Assignee(ApplicationBase):
     __tablename__ = "assignee"
     id = Column(Unicode(36), primary_key=True)
@@ -1438,7 +1511,7 @@ class App_Assignee(ApplicationBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             App_Assignee,
             [["id"]],
             session, default)
@@ -1450,7 +1523,7 @@ class App_Assignee(ApplicationBase):
             return_string = self.organization
         else:
             return_string = u"{0} {1}".format(self.name_first, self.name_last)
-        return "<Assignee('{0}')>".format(unidecode(return_string))
+        return "<Assignee('{0}')>".format(str(return_string))
 
 
 class App_Inventor(ApplicationBase):
@@ -1527,7 +1600,7 @@ class App_Inventor(ApplicationBase):
 
     @classmethod
     def fetch(self, session, default={}):
-        return schema_func.fetch(
+        return lib.alchemy.schema_func.fetch(
             App_Inventor,
             [["id"]],
             session, default)
@@ -1535,7 +1608,7 @@ class App_Inventor(ApplicationBase):
     # ----------------------------------
 
     def __repr__(self):
-        return "<Inventor('{0}')>".format(unidecode(self.name_full))
+        return "<Inventor('{0}')>".format(str(self.name_full))
 
 
 # CLASSIFICATIONS ------------------

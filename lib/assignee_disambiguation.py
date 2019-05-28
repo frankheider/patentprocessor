@@ -30,27 +30,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 Performs a basic assignee disambiguation
 """
-from collections import defaultdict, deque
+from collections import defaultdict, Counter
+
 import uuid
-from string import lowercase as alphabet
-import re
-import md5
-import cPickle as pickle
-import alchemy
-from collections import Counter
+import string
+import regex as re
+import hashlib as md5
+import lib.alchemy as alchemy
 from Levenshtein import jaro_winkler
-from alchemy import get_config, match
-from alchemy.schema import *
-from alchemy.match import commit_inserts, commit_updates
-from handlers.xml_util import normalize_utf8
+from lib.alchemy import get_config, session_generator
+import lib.alchemy.schema as schema
 from datetime import datetime
-from sqlalchemy.sql import or_
-from sqlalchemy.sql.expression import bindparam
-from unidecode import unidecode
-from tasks import bulk_commit_inserts, bulk_commit_updates
-import multiprocessing
+from lib.tasks import bulk_commit_inserts, bulk_commit_updates
 import itertools
-import sys
 import json
 
 config = get_config()
@@ -64,8 +56,8 @@ uuids_by_cleanidletter = defaultdict(list)
 
 grant_uuids = set()
 app_uuids = set()
-grantsessiongen = alchemy.session_generator(dbtype='grant')
-appsessiongen = alchemy.session_generator(dbtype='application')
+grantsessiongen = session_generator(dbtype='grant')
+appsessiongen = session_generator(dbtype='application')
 
 nodigits = re.compile(r'[a-z ]')
 stoplist = ['the','of','and','a','an','at']
@@ -100,14 +92,14 @@ def get_cleanid(obj):
                         cleanid.split()))
     cleanid = ''.join(nodigits.findall(cleanid)).strip()
     for pair in substitutions:
-      cleanid = cleanid.replace(pair[0], pair[1])
+        cleanid = cleanid.replace(pair[0], pair[1])
     return cleanid
 
 def get_similarity(uuid1, uuid2):
     clean1 = uuid_to_cleanid[uuid1]
     clean2 = uuid_to_cleanid[uuid2]
     if clean1 == clean2:
-      return 1.0
+        return 1.0
     return jaro_winkler(clean1,clean2,0.0)
 
 def disambiguate_letter(letter):
@@ -115,7 +107,7 @@ def disambiguate_letter(letter):
     bucket = uuids_by_cleanidletter[letter]
     uuidsremaining = bucket[:]
     groupkeys = []
-    print len(bucket),'raw assignees for letter:', letter
+    print (len(bucket),'raw assignees for letter:', letter)
     i = 1
     while True:
         if not uuidsremaining:
@@ -123,7 +115,7 @@ def disambiguate_letter(letter):
         i += 1
         uuid = uuidsremaining.pop()
         if i%10000 == 0:
-            print i, datetime.now()
+            print (i, datetime.now())
         matcheduuid = False
         for groupkey in groupkeys:
             if get_similarity(uuid, groupkey) >= THRESHOLD:
@@ -144,7 +136,7 @@ def create_disambiguated_record_for_block(block):
     app_rawassignee_updates = []
     ra_objs = [uuid_to_object[uuid] for uuid in block]
     # vote on the disambiguated assignee parameters
-    freq = defaultdict(Counter)
+    _freq = defaultdict(Counter)
     param = {}
 
     for ra in ra_objs:
@@ -153,29 +145,29 @@ def create_disambiguated_record_for_block(block):
                 v = ''
             param[k] = v
 
-    if not param.has_key('organization'):
+    if 'organization'not in param:
         param['organization'] = ''
-    if not param.has_key('type'):
+    if 'type' not in param:
         param['type'] = ''
-    if not param.has_key('name_last'):
+    if 'name_last' not in param:
         param['name_last'] = ''
-    if not param.has_key('name_first'):
+    if 'name_first' not in param:
         param['name_first'] = ''
-    if not param.has_key('residence'):
+    if 'residence' not in param:
         param['residence'] = ''
-    if not param.has_key('nationality'):
+    if 'nationality' not in param:
         param['nationality'] = ''
-    if param.has_key('type'):
+    if 'type' in param:
         if not param['type'].isdigit():
             param['type'] = ''
 
     # create persistent identifier
     if param["organization"]:
-        param["id"] = md5.md5(unidecode(param["organization"])).hexdigest()
+        param["id"] = md5.md5(param["organization"].encode('utf-8')).hexdigest()
     elif param["name_last"]:
-        param["id"] = md5.md5(unidecode(param["name_last"]+param["name_first"])).hexdigest()
+        param["id"] = md5.md5(param["name_last"].encode('utf-8')+param["name_first"].encode('utf-8')).hexdigest()
     else:
-        param["id"] = md5.md5('').hexdigest()
+        param["id"] = md5.md5(''.encode('utf-8')).hexdigest()
 
 
     grant_assignee_inserts.append(param)
@@ -206,17 +198,27 @@ def run_disambiguation():
     # both grant and application databases
     grtsesh = grantsessiongen()
     appsesh = appsessiongen()
-    print 'fetching raw assignees',datetime.now()
-    rawassignees = list(grtsesh.query(RawAssignee))
-    rawassignees.extend(list(appsesh.query(App_RawAssignee)))
+    
+    dbs_type = alchemy.get_dbtype()
+    
+    print ('fetching raw assignees',datetime.now())
+    rawassignees = list(grtsesh.query(schema.RawAssignee))
+    rawassignees.extend(list(appsesh.query(schema.App_RawAssignee)))
+    
     # clear the destination tables
-    if alchemy.is_mysql():
-        grtsesh.execute('truncate assignee; truncate patent_assignee;')
-        appsesh.execute('truncate assignee; truncate application_assignee;')
+    if dbs_type == "mysql" or dbs_type == "postgres":
+        if dbs_type == "postgres":
+            #TODO Need to recreate the constraints !!!
+            #truncate is not working for pg -ALTER TABLE tablename DISABLE/ENABLE TRIGGER ALL;
+            grtsesh.execute('delete from assignee; delete from patent_assignee;')
+            appsesh.execute('delete from assignee; delete from application_assignee;')
+        else:
+            grtsesh.execute('truncate assignee; truncate patent_assignee;')
+            appsesh.execute('truncate assignee; truncate application_assignee;')
     else:
         grtsesh.execute('delete from assignee; delete from patent_assignee;')
         appsesh.execute('delete from assignee; delete from patent_assignee;')
-    print 'cleaning ids', datetime.now()
+    print ('cleaning ids', datetime.now())
     # uses the get_cleanid method to remove undesirable characters and
     # normalize to case and group by first letter
     for ra in rawassignees:
@@ -224,49 +226,69 @@ def run_disambiguation():
         cleanid = get_cleanid(ra)
         uuid_to_cleanid[ra.uuid] = cleanid
         if not cleanid:
-          continue
+            continue
         firstletter = cleanid[0]
         uuids_by_cleanidletter[firstletter].append(ra.uuid)
 
-    print 'disambiguating blocks', datetime.now()
+    print ('disambiguating blocks', datetime.now())
     # disambiguates each of the letter blocks using
     # the list of assignees as a stack and only performing
     # jaro-winkler comparisons on the first item of each block
     allrecords = []
-    for letter in alphabet:
-        print 'disambiguating','({0})'.format(letter),datetime.now()
+    for letter in list(string.ascii_lowercase):
+        print ('disambiguating','({0})'.format(letter),datetime.now())
         lettergroup = disambiguate_letter(letter)
-        print 'got',len(lettergroup),'records'
-        print 'creating disambiguated records','({0})'.format(letter),datetime.now()
+        print ('got',len(lettergroup),'records')
+        print ('creating disambiguated records','({0})'.format(letter),datetime.now())
         allrecords.extend(lettergroup.values())
     # create the attributes for the disambiguated assignee record from the
     # raw records placed into a block in the disambiguation phase
     res = map(create_disambiguated_record_for_block, allrecords)
-    mid = itertools.izip(*res)
-    grant_assignee_inserts = list(itertools.chain.from_iterable(mid.next()))
-    app_assignee_inserts = list(itertools.chain.from_iterable(mid.next()))
-    patentassignee_inserts = list(itertools.chain.from_iterable(mid.next()))
-    applicationassignee_inserts = list(itertools.chain.from_iterable(mid.next()))
-    grant_rawassignee_updates = list(itertools.chain.from_iterable(mid.next()))
-    app_rawassignee_updates = list(itertools.chain.from_iterable(mid.next()))
+    mid = itertools.zip_longest(*res)
+        
+    grant_assignee_inserts = list(itertools.chain.from_iterable(next(mid)))                                
+    app_assignee_inserts = list(itertools.chain.from_iterable(next(mid)))
+    patentassignee_inserts = list(itertools.chain.from_iterable(next(mid)))
+    applicationassignee_inserts = list(itertools.chain.from_iterable(next(mid)))
+    grant_rawassignee_updates = list(itertools.chain.from_iterable(next(mid)))
+    app_rawassignee_updates = list(itertools.chain.from_iterable(next(mid)))
 
     # write out the insert counts for each table into a text file
-    with open('mid.txt','wb') as f:
-      f.write(str(len(grant_assignee_inserts))+'\n')
-      f.write(str(len(app_assignee_inserts))+'\n')
-      f.write(str(len(patentassignee_inserts))+'\n')
-      f.write(str(len(applicationassignee_inserts))+'\n')
-      f.write(str(len(grant_rawassignee_updates))+'\n')
-      f.write(str(len(app_rawassignee_updates))+'\n')
-    # insert disambiguated assignee records
-    bulk_commit_inserts(grant_assignee_inserts, Assignee.__table__, alchemy.is_mysql(), 20000, 'grant')
-    bulk_commit_inserts(app_assignee_inserts, App_Assignee.__table__, alchemy.is_mysql(), 20000, 'application')
-    # insert patent/assignee link records
-    bulk_commit_inserts(patentassignee_inserts, patentassignee, alchemy.is_mysql(), 20000, 'grant')
-    bulk_commit_inserts(applicationassignee_inserts, applicationassignee, alchemy.is_mysql(), 20000, 'application')
-    # update rawassignees with their disambiguated record
-    bulk_commit_updates('assignee_id', grant_rawassignee_updates, RawAssignee.__table__, alchemy.is_mysql(), 20000, 'grant')
-    bulk_commit_updates('assignee_id', app_rawassignee_updates, App_RawAssignee.__table__, alchemy.is_mysql(), 20000, 'application')
+    with open('mid.txt','w') as f:
+        f.write(str(len(grant_assignee_inserts))+'\n')
+        f.write(str(len(app_assignee_inserts))+'\n')
+        f.write(str(len(patentassignee_inserts))+'\n')
+        f.write(str(len(applicationassignee_inserts))+'\n')
+        f.write(str(len(grant_rawassignee_updates))+'\n')
+        f.write(str(len(app_rawassignee_updates))+'\n')
+    
+    print ('insert disambiguated grant assignee records','({0})'.format(str(len(grant_assignee_inserts))),datetime.now())
+    
+    bulk_commit_inserts(grant_assignee_inserts, schema.Assignee.__table__, grtsesh, dbs_type, 20000, 'grant')
 
+    print ('insert disambiguated App_assignee records','({0})'.format(str(len(app_assignee_inserts))),datetime.now())
+
+    bulk_commit_inserts(app_assignee_inserts, schema.App_Assignee.__table__, appsesh, dbs_type, 20000, 'application')
+    # insert patent/assignee link records
+    
+    print ('insert disambiguated patentassignee records','({0})'.format(str(len(patentassignee_inserts))),datetime.now())
+
+    bulk_commit_inserts(patentassignee_inserts, schema.patentassignee, grtsesh,  dbs_type, 20000, 'grant')
+    
+    print ('insert disambiguated applicationassignee records','({0})'.format(str(len(applicationassignee_inserts))),datetime.now())
+
+    bulk_commit_inserts(applicationassignee_inserts, schema.applicationassignee, appsesh,  dbs_type, 20000, 'application')
+    # update rawassignees with their disambiguated record
+    print ('insert disambiguated grant_rawassignee records','({0})'.format(str(len(grant_rawassignee_updates))),datetime.now())
+    
+    bulk_commit_updates('assignee_id', grant_rawassignee_updates, schema.RawAssignee.__table__, grtsesh,  dbs_type, 20000, 'grant')
+    
+    print ('insert disambiguated app_rawassignee records','({0})'.format(letter),datetime.now())
+
+    bulk_commit_updates('assignee_id', app_rawassignee_updates, schema.App_RawAssignee.__table__, appsesh, dbs_type, 20000, 'application')
+
+    print ('insert disambiguated complete all records','({0})'.format(str(len(app_rawassignee_updates))),datetime.now())
+
+    
 if __name__=='__main__':
-  run_disambiguation()
+    run_disambiguation()

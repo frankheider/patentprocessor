@@ -70,7 +70,7 @@ import sys
 # ignore: 1 if the record has a granted patent, 0 else
 ROW = lambda x: u'{uuid}\t{isgrant}\t{ignore}\t{name_first}\t{name_middle}\t{name_last}\t{number}\t{mainclass}\t{subclass}\t{city}\t{state}\t{country}\t{assignee}\t{rawassignee}\n'.format(**x)
 
-def main(year, doctype):
+def consolidate(year, doctype):
     # get patents as iterator to save memory
     # use subqueryload to get better performance by using less queries on the backend:
     # --> http://docs.sqlalchemy.org/en/latest/orm/tutorial.html#eager-loading
@@ -86,66 +86,66 @@ def main(year, doctype):
     for patent in patents:
         i += 1
         if i % 100000 == 0:
-          print i, datetime.now()
+            print (i, datetime.now())
         try:
-          # create common dict for this patent
-          primrawloc = patent.rawinventors[0].rawlocation
-          if primrawloc:
-            primloc = patent.rawinventors[0].rawlocation.location
-          else:
-            primloc = primrawloc
-          mainclass = patent.classes[0].mainclass_id if patent.classes else ''
-          subclass = patent.classes[0].subclass_id if patent.classes else ''
-          row = {'number': patent.id,
+        # create common dict for this patent
+            primrawloc = patent.rawinventors[0].rawlocation
+            if primrawloc:
+                primloc = patent.rawinventors[0].rawlocation.location
+            else:
+                primloc = primrawloc
+            mainclass = patent.classes[0].mainclass_id if patent.classes else ''
+            subclass = patent.classes[0].subclass_id if patent.classes else ''
+            row = {'number': patent.id,
                  'mainclass': mainclass,
                  'subclass': subclass,
                  'ignore': 0,
                  }
-          if doctype == 'grant':
-            row['isgrant'] = 1
-          elif doctype == 'application':
-            row['isgrant'] = 0
-            if patent.granted == True:
-              row['ignore'] = 1
-          row['assignee'] = get_cleanid(patent.rawassignees[0]) if patent.rawassignees else ''
-          row['assignee'] = row['assignee'].split('\t')[0]
-          row['rawassignee'] = get_cleanid(patent.rawassignees[0]) if patent.rawassignees else ''
-          row['rawassignee'] = row['rawassignee'].split('\t')[0]
-          # generate a row for each of the inventors on a patent
-          for ri in patent.rawinventors:
-              if not len(ri.name_first.strip()):
-                  continue
-              namedict = {'name_first': ri.name_first, 'uuid': ri.uuid}
-              raw_name = ri.name_last.split(' ')
-              # name_last is the last space-delimited word. Middle name is everything before that
-              name_middle, name_last = ' '.join(raw_name[:-1]), raw_name[-1]
-              namedict['name_middle'] = name_middle
-              namedict['name_last'] = name_last
-              rawloc = ri.rawlocation
-              if rawloc:
-                if rawloc.location:
-                  loc = rawloc.location
+            if doctype == 'grant':
+                row['isgrant'] = 1
+            elif doctype == 'application':
+                row['isgrant'] = 0
+                if patent.granted == True:
+                    row['ignore'] = 1
+            row['assignee'] = get_cleanid(patent.rawassignees[0]) if patent.rawassignees else ''
+            row['assignee'] = row['assignee'].split('\t')[0]
+            row['rawassignee'] = get_cleanid(patent.rawassignees[0]) if patent.rawassignees else ''
+            row['rawassignee'] = row['rawassignee'].split('\t')[0]
+            # generate a row for each of the inventors on a patent
+            for ri in patent.rawinventors:
+                if not len(ri.name_first.strip()):
+                    continue
+                namedict = {'name_first': ri.name_first, 'uuid': ri.uuid}
+                raw_name = ri.name_last.split(' ')
+                # name_last is the last space-delimited word. Middle name is everything before that
+                name_middle, name_last = ' '.join(raw_name[:-1]), raw_name[-1]
+                namedict['name_middle'] = name_middle
+                namedict['name_last'] = name_last
+                rawloc = ri.rawlocation
+                if rawloc:
+                    if rawloc.location:
+                        loc = rawloc.location
+                    else:
+                        loc = primloc
                 else:
-                  loc = primloc
-              else:
-                loc = primloc
-              namedict['state'] = loc.state if loc else ''# if loc else rawloc.state if rawloc else primloc.state if primloc else ''
-              namedict['country'] = loc.country if loc else ''# if loc else rawloc.country if rawloc else primloc.country if primloc else ''
-              namedict['city'] = loc.city if loc else ''# if loc else rawloc.city if rawloc else primloc.city if primloc else ''
-              if '??' in namedict['state'] or len(namedict['state']) == 0:
-                namedict['state'] = rawloc.state if rawloc else primloc.state if primloc else ''
-              if '??' in namedict['country'] or len(namedict['country']) == 0:
-                namedict['country'] = rawloc.country if rawloc else primloc.country if primloc else ''
-              if '??' in namedict['city'] or len(namedict['city']) == 0:
-                namedict['city'] = rawloc.city if rawloc else primloc.city if primloc else ''
-              tmprow = row.copy()
-              tmprow.update(namedict)
-              newrow = normalize_utf8(ROW(tmprow))
-              with codecs.open('disambiguator.csv', 'a', encoding='utf-8') as csv:
-                  csv.write(newrow)
+                    loc = primloc
+                namedict['state'] = loc.state if loc else ''# if loc else rawloc.state if rawloc else primloc.state if primloc else ''
+                namedict['country'] = loc.country if loc else ''# if loc else rawloc.country if rawloc else primloc.country if primloc else ''
+                namedict['city'] = loc.city if loc else ''# if loc else rawloc.city if rawloc else primloc.city if primloc else ''
+                if '??' in namedict['state'] or len(namedict['state']) == 0:
+                    namedict['state'] = rawloc.state if rawloc else primloc.state if primloc else ''
+                if '??' in namedict['country'] or len(namedict['country']) == 0:
+                    namedict['country'] = rawloc.country if rawloc else primloc.country if primloc else ''
+                if '??' in namedict['city'] or len(namedict['city']) == 0:
+                    namedict['city'] = rawloc.city if rawloc else primloc.city if primloc else ''
+                tmprow = row.copy()
+                tmprow.update(namedict)
+                newrow = normalize_utf8(ROW(tmprow))
+                with codecs.open('disambiguator.csv', 'a', encoding='utf-8') as csv:
+                    csv.write(newrow)
         except Exception as e:
-          print e
-          continue
+            print   (e)
+            continue
 
 def join(newfile):
     """
@@ -165,11 +165,11 @@ def join(newfile):
 
 if __name__ == '__main__':
     for year in range(1975, datetime.today().year+1):
-        print 'Running year',year,datetime.now(),'for grant'
-        main(year, 'grant')
+        print ('Running year',year,datetime.now(),'for grant')
+        consolidate(year, 'grant')
     for year in range(2001, datetime.today().year+1):
-        print 'Running year',year,datetime.now(),'for application'
-        main(year, 'application')
+        print ('Running year',year,datetime.now(),'for application')
+        consolidate(year, 'application')
 
     # join files
     join('disambiguator.csv')

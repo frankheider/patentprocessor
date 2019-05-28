@@ -30,15 +30,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Helper functions for database-related functionality.
 """
 import os
-import re
-import ConfigParser
+import regex as re
+import configparser
+
+from lib.alchemy.schema import *
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql import exists
 from collections import defaultdict
-import schema
-from match import *
+
+
+from lib.alchemy import match
+
 import uuid
 
 from sqlalchemy import exc
@@ -53,13 +57,13 @@ def fixid(x):
     return x
 
 @event.listens_for(Pool, "checkout")
-def ping_connection(dbapi_connection, connection_record, connection_proxy):
+def ping_connection(dbapi_connection, _connection_record, _connection_proxy):
     """
     This keeps the database connection alive over long-running processes (like assignee and location disambiguations)
     """
     cursor = dbapi_connection.cursor()
-    if not hasattr(cursor, 'MySQLError'):
-              return
+    if not hasattr(cursor, 'SQLError'):
+        return
     try:
         # reset the connection settings
         cursor.execute("SELECT 1;")
@@ -80,6 +84,31 @@ def is_mysql():
     config = get_config()
     return config.get('global').get('database') == 'mysql'
 
+def is_sql():
+    """
+    Returns True if currently connected to a MySQL database. Given that our only two options
+    are MySQL and SQLite, we use this function to determine when we can use certain functions
+    like `set foreign_key_checks = 0` and `truncate <tablaneme>`.
+    """
+    config = get_config()
+    if config.get('global').get('database') == 'mysql' or config.get('global').get('database') == 'postgres':
+        return True 
+    return False
+
+def get_dbtype():
+    """
+    Returns currently connected database. 
+    """
+    return get_config().get('global').get('database')
+
+def is_pg():
+    """
+    Returns True if currently connected to a MySQL database. Given that our only two options
+    are MySQL and SQLite, we use this function to determien when we can use certain functions
+    like `set foreign_key_checks = 0` and `truncate <tablaneme>`.
+    """
+    config = get_config()
+    return config.get('global').get('database') == 'postgres'
 
 def get_config(localfile="config.ini", default_file=True):
     """
@@ -95,7 +124,7 @@ def get_config(localfile="config.ini", default_file=True):
         openfile = localfile
     config = defaultdict(dict)
     if os.path.isfile(openfile):
-        cfg = ConfigParser.ConfigParser()
+        cfg = configparser.ConfigParser()
         cfg.read(openfile)
         for s in cfg.sections():
             for k, v in cfg.items(s):
@@ -139,17 +168,26 @@ def session_generator(db=None, dbtype='grant'):
         if os.path.basename(os.getcwd()) == 'lib':
             sqlite_db_path = '../' + sqlite_db_path
         engine = create_engine('sqlite:///{0}'.format(sqlite_db_path), echo=echo, echo_pool=True)
-    else:
+    elif db == "mysql":
         engine = create_engine('mysql+mysqldb://{0}:{1}@{2}/{3}?charset=utf8'.format(
             config.get(db).get('user'),
             config.get(db).get('password'),
             config.get(db).get('host'),
             config.get(db).get('{0}-database'.format(dbtype)), echo=echo), pool_size=3, pool_recycle=3600, echo_pool=True)
+    elif db == "postgres":
+        engine = create_engine('postgresql://{0}:{1}@{2}/{3}'.format(
+            config.get(db).get('user'),
+            config.get(db).get('password'),
+            config.get(db).get('host'),
+            config.get(db).get('{0}-database'.format(dbtype)), echo=echo), pool_size=3, pool_recycle=3600, echo_pool=True)
+    else:
+        print ("not supported Database")
+        return None
 
     if dbtype == 'grant':
-        schema.GrantBase.metadata.create_all(engine)
+        ApplicationBase.metadata.create_all(engine)
     else:
-        schema.ApplicationBase.metadata.create_all(engine)
+        ApplicationBase.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine, _enable_transaction_accounting=False)
     return scoped_session(Session)
@@ -171,24 +209,34 @@ def fetch_session(db=None, dbtype='grant'):
             config.get(db).get('path'),
             config.get(db).get('{0}-database'.format(dbtype)))
         engine = create_engine('sqlite:///{0}'.format(sqlite_db_path), echo=echo)
-    else:
+    elif db == "mysql":
         engine = create_engine('mysql+mysqldb://{0}:{1}@{2}/{3}?charset=utf8'.format(
             config.get(db).get('user'),
             config.get(db).get('password'),
             config.get(db).get('host'),
             config.get(db).get('{0}-database'.format(dbtype)), echo=echo))
+    elif db == "postgres":
+        engine = create_engine('postgresql://{0}:{1}@{2}/{3}'.format(
+            config.get(db).get('user'),
+            config.get(db).get('password'),
+            config.get(db).get('host'),
+            config.get(db).get('{0}-database'.format(dbtype)), echo=echo))
+    else:
+        print ("not supported Databse")
+        return None
 
     if dbtype == 'grant':
-        schema.GrantBase.metadata.create_all(engine)
+        GrantBase.metadata.create_all(engine)
     else:
-        schema.ApplicationBase.metadata.create_all(engine)
+        ApplicationBase.metadata.create_all(engine)
 
     Session = sessionmaker(bind=engine, _enable_transaction_accounting=False)
     session = Session()
+
     return session
 
 
-def add_grant(obj, override=True, temp=False):
+def add_grant(obj, override=True, _temp=False):
     """
     PatentGrant Object converting to tables via SQLAlchemy
     Necessary to convert dates to datetime because of SQLite (OK on MySQL)
@@ -208,20 +256,20 @@ def add_grant(obj, override=True, temp=False):
     """
 
     # if a patent exists, remove it so we can replace it
-    (patent_exists, ), = grantsession.query(exists().where(schema.Patent.number == obj.patent))
+    (patent_exists, ), = grantsession.query(exists().where(Patent.number == obj.patent))
     #pat_query = grantsession.query(Patent).filter(Patent.number == obj.patent)
     #if pat_query.count():
     if patent_exists:
         if override:
-            pat_query = grantsession.query(schema.Patent).filter(schema.Patent.id == obj.patent)
+            pat_query = grantsession.query(Patent).filter(Patent.id == obj.patent)
             grantsession.delete(pat_query.one())
         else:
             return
     if len(obj.pat["number"]) < 3:
         return
 
-    pat = schema.Patent(**obj.pat)
-    pat.application = schema.Application(**obj.app)
+    pat = Patent(**obj.pat)
+    pat.application = Application(**obj.app)
     # lots of abstracts seem to be missing. why?
     add_all_fields(obj, pat)
     if is_mysql():
@@ -248,8 +296,8 @@ def add_asg(obj, pat):
     for asg, loc in obj.assignee_list:
         asg = fixid(asg)
         loc = fixid(loc)
-        asg = schema.RawAssignee(**asg)
-        loc = schema.RawLocation(**loc)
+        asg = RawAssignee(**asg)
+        loc = RawLocation(**loc)
         grantsession.merge(loc)
         asg.rawlocation = loc
         pat.rawassignees.append(asg)
@@ -259,8 +307,8 @@ def add_inv(obj, pat):
     for inv, loc in obj.inventor_list:
         inv = fixid(inv)
         loc = fixid(loc)
-        inv = schema.RawInventor(**inv)
-        loc = schema.RawLocation(**loc)
+        inv = RawInventor(**inv)
+        loc = RawLocation(**loc)
         grantsession.merge(loc)
         inv.rawlocation = loc
         pat.rawinventors.append(inv)
@@ -269,7 +317,7 @@ def add_inv(obj, pat):
 def add_law(obj, pat):
     for law in obj.lawyer_list:
         law = fixid(law)
-        law = schema.RawLawyer(**law)
+        law = RawLawyer(**law)
         pat.rawlawyers.append(law)
 
 
@@ -277,16 +325,16 @@ def add_usreldoc(obj, pat):
     for usr in obj.us_relation_list:
         usr = fixid(usr)
         usr["rel_id"] = usr["number"]
-        usr = schema.USRelDoc(**usr)
+        usr = USRelDoc(**usr)
         pat.usreldocs.append(usr)
 
 
 def add_classes(obj, pat):
     for uspc, mc, sc in obj.us_classifications:
         uspc = fixid(uspc)
-        uspc = schema.USPC(**uspc)
-        mc = schema.MainClass(**mc)
-        sc = schema.SubClass(**sc)
+        uspc = USPC(**uspc)
+        mc = MainClass(**mc)
+        sc = SubClass(**sc)
         grantsession.merge(mc)
         grantsession.merge(sc)
         uspc.mainclass = mc
@@ -296,7 +344,7 @@ def add_classes(obj, pat):
 
 def add_ipcr(obj, pat):
     for ipc in obj.ipcr_classifications:
-        ipc = schema.IPCR(**ipc)
+        ipc = IPCR(**ipc)
         pat.ipcrs.append(ipc)
 
 
@@ -308,40 +356,40 @@ def add_citations(obj, pat):
             if re.match(r'^[A-Z]*\d+$', cit['number']):
                 cit['citation_id'] = cit['number']
                 cit = fixid(cit)
-                cit = schema.USPatentCitation(**cit)
+                cit = USPatentCitation(**cit)
                 pat.uspatentcitations.append(cit)
             # if not above, it's probably an application
             else:
                 cit['application_id'] = cit['number']
                 cit = fixid(cit)
-                cit = schema.USApplicationCitation(**cit)
+                cit = USApplicationCitation(**cit)
                 pat.usapplicationcitations.append(cit)
         # if not US, then foreign citation
         else:
             cit = fixid(cit)
-            cit = schema.ForeignCitation(**cit)
+            cit = ForeignCitation(**cit)
             pat.foreigncitations.append(cit)
     for ref in refs:
         ref = fixid(ref)
-        ref = schema.OtherReference(**ref)
+        ref = OtherReference(**ref)
         pat.otherreferences.append(ref)
 
 def add_claims(obj, pat):
     claims = obj.claims
     for claim in claims:
         claim = fixid(claim)
-        clm = schema.Claim(**claim)
+        clm = Claim(**claim)
         pat.claims.append(clm)
 
 
 def commit():
     try:
         grantsession.commit()
-    except Exception, e:
+    except Exception as e:
         grantsession.rollback()
-        print str(e)
+        print (str(e))
 
-def add_application(obj, override=True, temp=False):
+def add_application(obj, override=True, _temp=False):
     """
     PatentApplication Object converting to tables via SQLAlchemy
     Necessary to convert dates to datetime because of SQLite (OK on MySQL)
@@ -361,17 +409,17 @@ def add_application(obj, override=True, temp=False):
     """
 
     # if the application exists, remove it so we can replace it
-    (app_exists, ), = appsession.query(exists().where(schema.App_Application.number == obj.application))
+    (app_exists, ), = appsession.query(exists().where(App_Application.number == obj.application))
     if app_exists:
         if override:
-            app_query = appsession.query(schema.App_Application).filter(schema.App_Application.number == obj.application)
+            app_query = appsession.query(App_Application).filter(App_Application.number == obj.application)
             appsession.delete(app_query.one())
         else:
             return
     if len(obj.app["number"]) < 3:
         return
 
-    app = schema.App_Application(**obj.app)
+    app = App_Application(**obj.app)
     # lots of abstracts seem to be missing. why?
     add_all_app_fields(obj, app)
 
@@ -389,8 +437,8 @@ def add_app_asg(obj, app):
     for asg, loc in obj.assignee_list:
         loc = fixid(loc)
         asg = fixid(asg)
-        asg = schema.App_RawAssignee(**asg)
-        loc = schema.App_RawLocation(**loc)
+        asg = App_RawAssignee(**asg)
+        loc = App_RawLocation(**loc)
         appsession.merge(loc)
         asg.rawlocation = loc
         app.rawassignees.append(asg)
@@ -400,8 +448,8 @@ def add_app_inv(obj, app):
     for inv, loc in obj.inventor_list:
         loc = fixid(loc)
         inv = fixid(inv)
-        inv = schema.App_RawInventor(**inv)
-        loc = schema.App_RawLocation(**loc)
+        inv = App_RawInventor(**inv)
+        loc = App_RawLocation(**loc)
         appsession.merge(loc)
         inv.rawlocation = loc
         app.rawinventors.append(inv)
@@ -410,9 +458,9 @@ def add_app_inv(obj, app):
 def add_app_classes(obj, app):
     for uspc, mc, sc in obj.us_classifications:
         uspc = fixid(uspc)
-        uspc = schema.App_USPC(**uspc)
-        mc = schema.App_MainClass(**mc)
-        sc = schema.App_SubClass(**sc)
+        uspc = App_USPC(**uspc)
+        mc = App_MainClass(**mc)
+        sc = App_SubClass(**sc)
         appsession.merge(mc)
         appsession.merge(sc)
         uspc.mainclass = mc
@@ -422,7 +470,7 @@ def add_app_classes(obj, app):
 
 def add_app_ipcr(obj, app):
     for ipc in obj.ipcr_classifications:
-        ipc = schema.App_IPCR(**ipc)
+        ipc = IPCR(**ipc)
         app.ipcrs.append(ipc)
 
 
@@ -430,16 +478,16 @@ def add_app_claims(obj, app):
     claims = obj.claims
     for claim in claims:
         claim = fixid(claim)
-        clm = schema.App_Claim(**claim)
+        clm = App_Claim(**claim)
         app.claims.append(clm)
 
 
 def commit_application():
     try:
         appsession.commit()
-    except Exception, e:
+    except Exception as e:
         appsession.rollback()
-        print str(e)
+        print (str(e))
 
 grantsession = fetch_session(dbtype='grant')
 appsession = fetch_session(dbtype='application')

@@ -2,4 +2,4 @@
 
 rm disambiguator.csv
 echo 'Running consolidation for disambiguator'
-python consolidate.py $1
+python3 consolidate.py $1

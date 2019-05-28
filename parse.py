@@ -40,28 +40,33 @@ for explanation of configuration options
 import logging
 import os
 import datetime
-import re
+import regex as re
 import sys
 import lib.argconfig_parse as argconfig_parse
 import lib.alchemy as alchemy
 import shutil
 from lib.config_parser import get_xml_handlers
-from lib.alchemy.match import commit_inserts, commit_updates
+
 
 logfile = "./" + 'xml-parsing.log'
 logging.basicConfig(filename=logfile, level=logging.DEBUG)
 commit_frequency = alchemy.get_config().get('parse').get('commit_frequency')
 
 
-def list_files(patentroot, xmlregex):
+def list_files(patentdir, xmlregex):
     """
     Returns listing of all files within patentroot
     whose filenames match xmlregex
     """
-    files = [patentroot+'/'+fi for fi in os.listdir(patentroot)
-             if re.search(xmlregex, fi, re.I) is not None]
+  
+    
+    files = [os.path.join(dp, f) for dp, _dn, fn in os.walk(os.path.expanduser(patentdir)) for f in fn
+             if re.search(xmlregex, f, re.I) is not None]
+    
+#    files = [patentroot+'/'+fi for fi in os.listdir(patentroot)
+#             if re.search(xmlregex, fi, re.I) is not None]
     if not files:
-        logging.error("No files matching {0} found in {1}".format(xmlregex, patentroot))
+        logging.error("No files matching {0} found in {1}".format(xmlregex, patentdir))
         sys.exit(1)
     return files
 
@@ -71,7 +76,17 @@ def _get_date(filename, dateformat='ipg%y%m%d.xml'):
     Given a [filename], returns the expanded year.
     The optional [dateformat] argument allows for different file formats
     """
-    filename = re.search(r'ip[ag]\d{6}', filename) or re.search(r'p[ag]\d{6}', filename)
+    if re.search(r'US\d{11}[A-Z]\d-\d{8}', filename):
+        filename = re.search(r'(?<=-)\w+', filename)
+        date = filename.group()
+        return int(datetime.datetime.strptime(date, '%Y%m%d').strftime('%Y%m%d'))
+
+    if re.search(r'US\d{8}-\d{8}', filename):
+        filename = re.search(r'(?<=-)\w+', filename)
+        date = filename.group()
+        return int(datetime.datetime.strptime(date, '%Y%m%d').strftime('%Y%m%d'))
+        
+    filename = re.search(r'ip[ag]\d{6}', filename) or re.search(r'p[ag]\d{6}', filename) 
     if not filename:
         return 'default'
     filename = filename.group() + '.xml'
@@ -85,7 +100,7 @@ def _get_parser(date, doctype='grant'):
     to parse it
     """
     xmlhandlers = get_xml_handlers('process.cfg', doctype)
-    for daterange in xmlhandlers.iterkeys():
+    for daterange in xmlhandlers:
         if daterange[0] <= date <= daterange[1]:
             return xmlhandlers[daterange]
     return xmlhandlers['default']
@@ -125,23 +140,35 @@ def parse_files(filelist, doctype='grant'):
     """
     if not filelist:
         return
-    commit = alchemy.commit
     for filename in filelist:
-        print filename
-        for i, xmltuple in enumerate(extract_xml_strings(filename)):
-            patobj = parse_patent(xmltuple, doctype)
-            if doctype == 'grant':
-                alchemy.add_grant(patobj)
-                commit = alchemy.commit
-            else:
-                alchemy.add_application(patobj)
-                commit = alchemy.commit_application
-            if commit_frequency and ((i+1) % commit_frequency == 0):
-                commit()
-                logging.info("{0} - {1} - {2}".format(filename, (i+1), datetime.datetime.now()))
-                print " *", (i+1), datetime.datetime.now()
-        commit()
-        print " *", "Complete", datetime.datetime.now()
+        parse_file (filename, doctype)
+
+def parse_file(filename, doctype='grant'):
+    """
+    Takes in a file name and commits
+    them to the database. This method is designed to be used sequentially to
+    account for db concurrency.  The optional argument `commit_frequency`
+    determines the frequency with which we commit the objects to the database.
+    If set to 0, it will commit after all patobjects have been added.  Setting
+    `commit_frequency` to be low (but not 0) is helpful for low memory machines.
+    """
+    print (filename)
+    commit = alchemy.commit
+    
+    for i, xmltuple in enumerate(extract_xml_strings(filename)):
+        patobj = parse_patent(xmltuple, doctype)
+        if doctype == 'grant':
+            alchemy.add_grant(patobj)
+            commit = alchemy.commit
+        else:
+            alchemy.add_application(patobj)
+            commit = alchemy.commit_application
+        if commit_frequency and ((i+1) % commit_frequency == 0):
+            commit()
+            logging.info("{0} - {1} - {2}".format(filename, (i+1), datetime.datetime.now()))
+            print (" *", (i+1), datetime.datetime.now())
+    commit()
+    print (" *", "Complete", datetime.datetime.now())
 
 
 def parse_patent(xmltuple, doctype='grant'):
@@ -171,23 +198,24 @@ def move_tables(output_directory):
         return
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-    dbtype = alchemy.config.get('global', 'database')
-    dbfile = alchemy.config.get(dbtype, 'database')
+    dbtype = alchemy.get_config().get('global').get('database')
+    
+    dbfile = alchemy.get_config().get(dbtype).get('database')
     try:
         shutil.move(dbfile,
                     '{0}/{1}'.format(output_directory, dbfile))
     except:
-        print 'Database file {0} does not exist'.format(dbfile)
+        print ('Database file {0} does not exist'.format(dbfile))
 
 def mark_granted():
     from lib.tasks import bulk_commit_updates
     grantsessiongen = alchemy.session_generator(dbtype='grant')
     appsessiongen = alchemy.session_generator(dbtype='application')
-    grantsession = grantsessiongen()
+    _grantsession = grantsessiongen()
     granted_apps = [{'pk': x.id, 'update': 1} for x in list(grantsessiongen.query(alchemy.schema.Application))]
 
-    appsession = appsessiongen()
-    bulk_commit_updates('granted', granted_apps, alchemy.schema.App_Application.__table__, alchemy.is_mysql(), 20000, 'application')
+    _appsession = appsessiongen()
+    bulk_commit_updates('granted', granted_apps, alchemy.schema.App_Application, alchemy.get_dbtype(), 20000, 'application')
 
 def main(patentroot, xmlregex, verbosity, output_directory='.', doctype='grant'):
     logfile = "./" + 'xml-parsing.log'

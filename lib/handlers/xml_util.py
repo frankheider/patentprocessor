@@ -32,8 +32,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 Collection of useful functions and tools for working with XML documents
 """
 
-import re
-from itertools import izip
+import regex as re
+
 from unicodedata import normalize
 from cgi import escape
 
@@ -44,7 +44,7 @@ def flatten(ls_of_ls):
     where list `i` contains the `i`th element from the original
     set of lists.
     """
-    return map(list, list(izip(*ls_of_ls)))
+    return map(list, list(zip(*ls_of_ls)))
 
 def extend_padding(ls_of_ls, padding=''):
     """
@@ -84,7 +84,7 @@ def normalize_utf8(string):
     Normalizes [string] to be UTF-8 encoded. Accepts both unicode and normal
     Python strings.
     """
-    if isinstance(string, unicode):
+    if isinstance(string, str):
         return normalize('NFC', string)
     else:
         return normalize('NFC', string.decode('utf-8'))
